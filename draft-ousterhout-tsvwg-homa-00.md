@@ -19,11 +19,11 @@
 # Change the file extension to match the format (.xml for XML, etc...)
 #
 ###
-title: "TODO - Your title"
-abbrev: "TODO - Abbreviation"
+title: "The Homa Transport Protocol"
+abbrev: "Homa"
 category: info
 
-docname: draft-todo-yourname-protocol-latest
+docname: draft-ousterhout-tsvwg-homa
 submissiontype: IETF  # also: "independent", "editorial", "IAB", or "IRTF"
 number:
 date:
@@ -45,9 +45,9 @@ venue:
 
 author:
  -
-    fullname: Your Name Here
-    organization: Your Organization Here
-    email: your.email@example.com
+    fullname: John Ousterhout
+    organization: Stanford University
+    email: ouster@cs.stanford.edu
 
 normative:
 
