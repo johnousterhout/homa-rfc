@@ -2,11 +2,16 @@
 
 SRC = draft-ousterhout-tsvwg-homa-00.md
 
-all: homa-rfc.txt
+all: homa-rfc.txt homa-rfc.html
 
-homa-rfc.txt: $(SRC)
+homa-rfc.xml: $(SRC)
 	kramdown-rfc $(SRC) > homa-rfc.xml
-	xml2rfc homa-rfc.xml
+
+homa-rfc.txt: homa-rfc.xml
+	xml2rfc --text -o homa-rfc.txt homa-rfc.xml
+
+homa-rfc.html: homa-rfc.xml
+	xml2rfc --html -o homa-rfc.html homa-rfc.xml
 
 clean:
 	rm homa-rfc.xml homa-rfc.txt
