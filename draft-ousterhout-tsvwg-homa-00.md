@@ -160,29 +160,58 @@ features will be discussed in more detail in later sections.
   transmitted unilaterally by the sender, but the scheduled receiver
   controls the transmission of the scheduled portion by sending *grants*.
 
-* Homa prioritizes shorter messages over longer ones. It does this in two ways:
+* Homa prioritizes shorter messages over longer ones. Specifically, it
+  attempts to approximate SRPT (Shortest Remaining Processing Time first),
+  which favors messages with fewer bytes remaining to transmit.
+  It does this in several ways:
 
   * Homa takes advantage of the priority queues in datacenter switches,
     arranging for shorter messages to use higher-priority queues.
+    The receiver of a message determines the priority for each incoming
+    packet of the message (including unscheduled packets).
 
   * When multiple messages are inbound to a single receiver, the
     receiver uses grants to prioritize shorter messages.
+
+  * When transmit queues build on senders, they use SRPT to prioritize outgoing
+    packets. In order to prevent NIC queue buildup, which would damage
+    SRPT, Homa endpoints generally need to implement packet pacing.
+
+* The packets for a message may be delivered out of order, and receivers
+  MUST reassemble out-of-order messages without requiring
+  retransmission. Homa encourages the use of packet spraying for load
+  balancing in the switching fabric.
+
+* Homa receivers are responsible for detecting lost packets and
+  requesting retransmission.
+
+* Homa implements "at most once semantics" for RPCs. Among other things,
+  this means that the server for an RPC must retain its state for that
+  RPC until the client has received the response message. Homa implements
+  an *acknowledgment* mechanism where clients (eventually) inform servers
+  that it is safe for them to reclaim RPC state.
 
 # Conventions and Definitions
 
 {::boilerplate bcp14-tagged}
 
-Commonly used terms in this document are described below.
+Commonly used terms in this document are described below (alphabetical
+order).
+
+**Acknowledgment:**
+: A token sent from an RPC's client to its server, indicating that it
+  is safe for the server to delete its state for the RPC. There are no
+  packet-level acknowledgments in Homa.
 
 **Client:**
 : An entity that initiates a Homa RPC: it sends a request message and
 receives the response. This term may refer to either the
-application that initiates the RPC or the endpoint that implements it.
+application that initiates the RPC or to the endpoint that implements it.
 
 **Endpoint:**
 : An entity that implements the Homa protocol, typically associated with
-a single network link on a given machine. Endpoints can support both
-clients and servers.
+a single network link on a given machine. Endpoints can acts both
+client and server.
 
 **Grant:**
 : A token issued by the receiver for a message, which entitles the
@@ -193,6 +222,14 @@ clients and servers.
 **Homa:**
 : The transport protocol described by this document. Homa is a name,
   not an acronym.
+
+**Incoming:**
+: Number of bytes of data in a message that have been authorized to be
+  transmitted but have not yet been received. Data is authorized it is
+  within the unscheduled region of a message or if the receiver has
+  transmitted a `GRANT` packet for it. Data is considered "incoming"
+  even if the sender has not yet received the grant or the data has
+  not yet been transmitted.
 
 **Message:**
 : The unit of communication that Homa provides to applications.
@@ -238,7 +275,11 @@ packets regardless of type.
 **Server:**
 : An entity that receives a Homa request and sends the corresponding
 response. This term may refer to either an application program or the
-the point that implements it.
+endpoint that implements it.
+
+**SRPT (Shortest Remaining Pressing Time):**
+: Homa tries to prioritize messages that have the fewest remaining
+  bytes to transmit, but on the sender side and the receiver side.
 
 **TCP Segmentation Offload (TSO):**
 : A hardware feature implemented by most NICs, which allows host
@@ -248,6 +289,10 @@ which look like packets that exceed the MTU. The NIC divides
 each TSO frame into multiple smaller packets ("segments") for
 transmission. In this document the term "packet" always refers
 to the entities transmitted on the wire, not TSO frames.
+
+**Top of Rack Switch (TOR):**
+: The network switches at the edges of the datacenter switching
+  fabric. Individual hosts connect to TORs.
 
 **Unscheduled Data:**
 : The initial portion of a message, which may be transmitted
@@ -324,7 +369,7 @@ of data in the packet.
 
 **Doff:**
 : Corresponds to the Data Offset field in TCP. Only used by senders
-in order to ensure correct TSO behavior; never used by receivers.
+in order to ensure correct TSO behavior; MUST NOT be used by Homa receivers.
 
 **Checksum:**
 : Corresponds to the Checksum field in TCP. Not used by Homa, but may
@@ -625,6 +670,305 @@ the common header:
 **Ack Server Port:**
 : The server port number to which `Ack Rpcid` was targeted.
 
+# Policy Considerations for Grants
+
+The policy for issuing grants (which messages to grant at any given time and
+how much to grant to each message) involves complex considerations and has
+a significant impact on message latency and throughput, network link
+utilization, buffer occupancy in network switches, and packet drops.
+
+The basic lifecycle of a message is as follows:
+
+* The message sender transmits one or more packets containing unscheduled
+  data. It is possible for the amount of unscheduled data in a message to
+  be zero; in this case the sender transmits a `DATA` packet containing
+  no data (but it will indicate the message length).
+
+* Once the first `DATA` packet has been received, the receiver begins
+  issuing grants for the scheduled bytes of the message.
+
+* As grants arrive at the sender, it transmits additional data packets. As
+  these packets are received, the receiver issues additional grants, until
+  eventually the entire message has been transmitted.
+
+## Achieving high throughput
+
+At any given time there is a range of bytes in a message that have been
+granted but not yet been received. The number of bytes in this range is
+referred to as the *incoming* for the message. A byte is considered to
+have been granted once the `GRANT` packet has been transmitted by the
+receiver,  even if the grant has not yet been received by the sender and/or
+the packet containing the byte has not been transmitted by the sender.
+Unscheduled data has been implicitly granted, so it is included in the
+message's incoming as soon as the first `DATA` packet arrives at the receiver.
+
+The term *total incoming* refers to the sum of the incomings of all messages
+known to an endpoint.
+
+In order for a message to achieve the full throughput of the network, its
+incoming must always be at least as large as the bandwidth-delay product (BDP)
+for a packet roundtrip. The relevant bandwidth for BDP
+is that of the network links connecting hosts and top-of-rack switches
+(TORs); this discussion assumes for simplicity that all host-TOR uplinks
+have the same bandwidth. The delay for BDP must include all software
+overheads. For example, delay can be measured on the sender as the time
+from when the first `DATA` packet for a message is passed to the NIC until
+the packet
+has been received and processed by software on the receiver, a `GRANT`
+packet is issued by the receiver, the `GRANT` is received and processed
+by software on the sender, and a subsequent `DATA` packet has been
+passed to the NIC. On the receiver, delay can be measured as the time
+from when Homa software receives a `DATA` packet until a new `GRANT`
+has been transmitted, the `GRANT` has been received and processed by
+software on the sender, a `DATA` packet  authorized by the `GRANT`
+has been transmitted, and that packet has been received by Homa software
+on the receiver.
+
+The round-trip time for BDP is dominated by software overheads.  For example,
+the network hardware contribution to round-trip time can be as low as 5 μs,
+but the total round-trip time including software is likely to be at least
+15-20 μs in the best case on unloaded servers [HomaLinux]. Software overheads
+are affected significantly by server load (e.g., hot spots can cause large
+delays in servicing incoming packets). On servers
+with moderate loads, median round-trip times are likely to be at least
+30-50 μs, with 99th-percentile times of 100-300 μs [HomaLinux].
+If we assume a round-trip time of 100 μs in order to ensure consistently
+high throughput under load, with a link speed of 100 Gbps, then the
+incoming for a message (and also the amount of unscheduled data) must
+be at least 1.25 Mbytes. As discussed below, buffer occupancy
+considerations probably make this amount impractical.
+
+## SRPT and Overcommitment
+
+Grants play an important role in implementing SRPT. If a receiver has
+multiple inbound messages, it SHOULD use grants to prioritize messages
+with fewer remaining bytes to transmit.
+
+The simplest approach would be to issue grants only to the highest priority
+message, allowing that message to consume its entire link bandwidth. Then,
+once the highest priority message is completely granted, the receiver can
+issue grants to the next higher priority message, and so on. If a new
+message begins arriving and has fewer remaining bytes than the current
+highest priority message, then the receiver stops granting to the previous
+message and begins granting to the new message.
+
+Unfortunately a one-message-at-a-time approach will result in wasted
+link bandwidth. The problem is that a sender may also have multiple
+outbound messages. If it has grants for more than one of them, then it
+will dedicate its uplink bandwidth to the highest priority message.
+Thus, when a receiver issues a grant it cannot be certain that the
+sender will transmit the granted bytes immediately. If a receiver
+only grants to one message and that message's sender choose not to
+transmit the message, then there will be a "bubble" on
+the receiver's downlink where its bandwidth is not utilized, even
+though there might be other inbound messages that could use the bandwidth.
+Measurements in [Homa] indicate that a one-message-at-a-time approach
+wastes about 40% of the link bandwidth in mixed workloads.
+
+In order to maximize link bandwidth utilization, receivers SHOULD
+*overcommit* their downlinks; that is, they should maintain outstanding
+grants for more than one message at a time. With this approach, even if
+some senders choose not to transmit, other senders can use the available
+link bandwidth. A degree of overcommitment of 4-8 seems adequate in practice.
+
+Overcommitment has two potential negative consequences. The first is that
+it potentially weakens SRPT: if the highest-priority sender is willing to
+transmit, there may be packets from lower-priority messages that compete
+for the downlink bandwidth, thereby reducing the throughput for the
+high-priority message. This problem is solved by using priorities, as
+discussed below.
+
+The second problem with overcommitment is that it increases buffer
+occupancy in the network switch. If a receiver grants to multiple inbound
+messages and all of their senders transmit, the aggregate bandwidth of
+transmission will exceed the bandwidth of the receiver's downlink, so
+packets will be buffered at the egress port in the TOR. The amount of
+buffer space occupied will equal the total incoming across all of the
+receiver's inbound messages, less one BDP. Thus, the
+more messages a receiver grants to, the more buffer space will be
+consumed in the TOR (assuming total incoming increases with the degree
+of overcommitment). Buffer management is discussed in more detail below.
+
+## One message per endpoint
+
+Under normal conditions, a Homa endpoint SHOULD only issue grants to a
+single message from a given endpoint. If a receiver grants to multiple
+messages from the same endpoint, the sender will only transmit the higher
+priority of the two messages; if the sender has some other message to a
+different destination that is even higher priority, then it will not
+transmit either of the two lower-priority messages. Thus there is no
+point in granting to a second message from the same endpoint; better to
+use that grant for a message from a different endpoint, even if it is
+lower priority.
+
+However, as network speeds increase it may make sense for a receiver
+to grant to multiple messages from the same endpoint. This is because
+it is becoming increasingly difficult for a single message to consume
+all of the outbound bandwidth of a network link. For example, the
+bandwidth for copying data from user space into nework packets
+hsa been measured at 30-40 Gbps on some machines; this is inadequate
+to support a 100 Gbps link). When this occurs, it may make sense to
+grant to multiple messages from the same endpoint in order to ensure
+full usage of the sender's uplink.
+
+## FIFO grants
+
+The SRPT policy has been shown to result in low latencies across almost
+all message lengths [Homa] [HomaLinux]. Although the latency benefits are
+greatest for short messages, Homa also reduces latencies for
+long messages when compared to the "fair sharing" approach used in TCP.
+This is because SRPT results in "run to completion" behavior. Once a
+message becomes highest priority, it will remain highest priority until
+it completes (unless a new message with higher priority arrives) so it
+will finish quickly.  In contrast, fair sharing will split the available
+network bandwidth across all of the inbound messages, so all of the
+inbound messages finish slowly. This is similar to a phenomenon
+observed in process scheduling: when there are many CPU-bound processes,
+FIFO scheduling results in lower average completion time than round-robin.
+
+In principle it is possible that SRPT could result in starvation for the
+longest inbound message, if there are enough shorter messages to fully
+utilize the link bandwidth. This is unlikely to occur in practice, though,
+since network links are rarely driven at 100% capacity; lab experiments
+have found it difficult to generate starvation even with adversarial
+workloads.
+
+To eliminate any possibility of starvation, a receiver MAY reserve a
+small fraction of its link bandwidth for grants to the oldest inbound
+message rather than the highest priority one.  A FIFO fraction of about
+5% seems adequate to eliminate starvation.
+
+# Priorities and Cutoffs
+
+Homa uses the priority queues in modern data center switches to implement
+SRPT. A sender can specify a priority in each outbound packet (for example,
+using the high-order bits of the DSCP field in IPv4 or the high-order bits
+of the Traffic Class field in IPv6).
+Network switches can be configured to use the priority value in a packet
+to place the packet in one of several queues at the switch egress port.
+Switches can also be configured to serve the egress queues in strict
+priority order, so that higher-priority packets are transmitted before
+lower-priority packets. This section describes how Homa uses packet
+priorities.
+
+## Scheduled packets
+
+Each `GRANT` packet contains a Priority field, which the sender MUST use
+for all subsequent packets in the associated message. The receiver thus
+has direct control over the priority for each scheduled packet. When a
+receiver grants to multiple inbound messages at once, it SHOULD assign
+a different priority for each message (highest priority for the message
+with the least remaining bytes to transmit). This ensures that when
+multiple senders transmit simultaneously and the receiver's TOR link
+is overcommitted, packets from the highest priority message will be
+transmitted and packets for other messages will be buffered in the TOR.
+If the sender chooses not to transmit the highest priority message,
+then packets from other messages will get through to the receiver.
+The use of priorities allows Homa to achieve "perfect" SRPT even when
+overcommitting its TOR link.
+
+## Unscheduled packets
+
+For unscheduled packets the receiver must assign packet priorities in
+advance. It does this by analyzing redent incoming traffic and
+assigning unscheduled priorities based on message length (shorter messages
+receive higher priorities). A collection of "cutoffs" identifies the
+message lengths that separate different priority
+levels. Each receiver communicates its cutoffs to senders using `CUTOFF`
+packets. Senders retain information about the cutoffs for each
+endpoint that they communicate with, and use that information to choose
+priorities for unscheduled packets.
+
+A version number is associated with the cutoff information for each
+endpoint. A receiver SHOULD occasionally update its cutoffs to reflect
+changes in traffic patterns and when it does so it MUST assign a new
+version number for the new cutoffs.  The version number is included in
+`CUTOFFS` packets, saved on senders, and included in `DATA`
+packets from the sender to the corresponding receiver. Each time a
+data packet is received, the receiver SHOULD check the Cutoff
+Version in the packet; if it is out of date, the receiver SHOULD
+send a new `CUTOFFS` packet to update the sender.
+
+Homa endpoints SHOULD assign unscheduled priorities so that each
+priority level is used for about the same number of incoming bytes.
+First, an endpoint can use recent traffic statistics to compute the
+total fraction of incoming bytes that are unscheduled. The available
+priority levels SHOULD be divided between unscheduled packets and
+schedule packets using this fraction; e.g., if 75% of incoming bytes
+are unscheduled, then 75% of available priority levels SHOULD be used
+for unscheduled packets and 25% of available priority levels SHOULD be
+used for scheduled packets. The highest priority levels MUST be
+assigned to unscheduled packets. At least one priority level MUST be
+available for each of unscheduled and scheduled packets, but the
+lowest unscheduled priority level may also be used as the highest
+scheduled priority level.
+
+Once the number of unscheduled priority levels is known, the cutoffs
+between unscheduled priorities SHOULD be chosen so that each priority
+level is used for the same amount of traffic (based on recent traffic
+patterns). Higher priority levels go to shorter messages.
+
+## How many priority levels?
+
+Measurements suggest that 4 priority levels is enough to produce
+good performance for Homa and additional priority levels beyond 4
+provide little benefit [HomaLinux]. Homa can operate with a single
+priority level and still provide considerable latency improvements
+over TCP, though a second priority level provides significant latency
+improvements.
+
+## Priorities and overcommitment
+
+The number of priority levels assigned for scheduled packets need
+not be the same as the degree of overcommitment. Suppose that an
+endpoint is currently granting to M inbound messages and there
+are S scheduled
+priority levels. If M > S, then the S-1 highest priority messages
+SHOULD each use a dedicated priority level and the M-(S-1) lowest
+priority messages SHOULD share the lowest scheduled priority level.
+If M < S, then the M lowest scheduled priorities SHOULD be used for
+grants (reserving the highest priority levels allows faster
+preemption if new higher-priority messages arrive).
+
+## Control packets
+
+All packets other than `DATA` packets SHOULD use the highest available
+priority level in order to minimize the delays experienced by these
+packets. It is particularly important for `GRANT` packets to have high
+priority in order to minimize control lag and maximize throughput.
+
+## Priorities and the switching fabric
+
+Packet priorities are most useful at the egress ports of TOR switches,
+since this is where congestion is most likely to occur. It is unclear
+whether there is any benefit to using priorities for other egress ports
+within the switching fabric. Congestion is less likely to occur at these
+ports (see below for discussion) and the priorities computed by Homa may
+not make much sense within the switching fabric (the priorities for each
+receiver are computed independently, and the packets at an egress port
+within the fabric could represent a variety of receivers, so it doesn't
+make sense to compare their priorities).
+
+# Managing Buffer Occupancy
+
+TBD
+
+* Messages allow predicting the future
+
+* Packet spraying, using client-side port field
+
+# Retransmission and Timeouts
+
+TBD
+
+# Pacing
+
+FIFO?
+
+# Acknowledgments
+
+TBD
+
 # Security Considerations
 
 This area is currently almost completely unaddressed in Homa. I
@@ -658,7 +1002,12 @@ be bugs.
 * Change so that messages are either entirely unscheduled or entirely
   scheduled?
 
-* How to determine the limit for unscheduled bytes?
+* How to determine the limit for unscheduled bytes? Include in CUTOFFS packets?
+
+* Change to drive retransmission entirely from the client?
+
+* How much should this document reflect current hardware and software
+  characteristics?
 
 --- back
 
