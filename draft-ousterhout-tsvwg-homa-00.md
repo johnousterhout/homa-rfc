@@ -1355,7 +1355,7 @@ Linux implementation of Homa) or that may be bugs.
 * To what degree should this document discusses policy choices, vs. just
   the mechanisms? In some cases, such as policies for issuing grants,
   it's not a problem if different endpoints use different policies.
-  to what degree should that be reflected here?
+  To what degree should that be reflected here?
 
 * How much should this document reflect current hardware and software
   characteristics?
