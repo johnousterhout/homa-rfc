@@ -253,7 +253,7 @@ client and server.
 
 **Incoming:**
 : Number of bytes of data in a message that have been authorized to be
-  transmitted but have not yet been received. Data is authorized it is
+  transmitted but have not yet been received. Data is authorized if it is
   within the unscheduled region of a message or if the receiver has
   transmitted a `GRANT` packet for it. Data is considered "incoming"
   even if the sender has not yet received the grant and/or the data has
@@ -382,14 +382,14 @@ of data in the packet.
 : Type of this packet. Must have one of the following values:
 
 ~~~
-     DATA      16
-     GRANT     17
-     RESEND    18
-     UNKNOWN   19
-     BUSY      20
-     CUTOFFS   21
-     NEED_ACK  23
-     ACK       24
+     DATA         16
+     GRANT        17
+     RESEND       18
+     RPC_UNKNOWN  19
+     BUSY         20
+     CUTOFFS      21
+     NEED_ACK     23
+     ACK          24
 ~~~
 
 **Doff:**
@@ -567,14 +567,14 @@ A `RESEND` packet contains a common header followed by the following fields:
 : The priority to use for all packets retransmitted in response to
 this request.
 
-## UNKNOWN packets {#secUnknownPkt}
+## RPC_UNKNOWN packets {#secUnknownPkt}
 
-A Homa endpoint sends a packet with type `UNKNOWN` when it receives a
+A Homa endpoint sends a packet with type `RPC_UNKNOWN` when it receives a
 `RESEND` packet with an Rpcid that is uknonwn to it (i.e. the endpoint
-has no outbound message for that Rpcid). An `UNKNOWN` packet consists of
+has no outbound message for that Rpcid). An `RPC_UNKNOWN` packet consists of
 a common header with no additional information.
 
-*This description needs work: `UNKNOWN` packets should only be issued by
+*This description needs work: `RPC_UNKNOWN` packets should only be issued by
 clients, and it's unclear that these packets are needed at all (replace
 with `ACK`s or just ignore?).*
 
@@ -1103,7 +1103,7 @@ than once.
 Ensuring at-most-once semantics requires careful management of RPC
 state on servers. The server creates internal state for an RPC
 when it receives the first `DATA` packet for that RPC. Under normal
-conditions the state will be retained until the RPC has been exceuted
+conditions the state will be retained until the RPC has been executed
 by the application and the result has been returned to the client.
 
 Up until the request message is passed to the server application for
