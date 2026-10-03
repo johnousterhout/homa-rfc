@@ -48,6 +48,14 @@ author:
     fullname: John Ousterhout
     organization: Stanford University
     email: ouster@cs.stanford.edu
+ -
+    fullname: Thiyagarajan Velappan
+    organization: Mastercard, Inc.
+    email: Thiyagarajan.Velappan@mastercard.com
+ -
+    fullname: Steven Bagby
+    organization: Mastercard, Inc.
+    email: Steven.Bagby@mastercard.com
 
 normative:
   RFC9293:
@@ -178,23 +186,24 @@ features will be discussed in more detail in later sections.
   so RPCs may not complete in the same order they were initiated.
 
 * Flow control in Homa is driven from receivers, not senders. Short messages
-  may be transmitted in their entirety by senders without any flow control.
-  Longer messages are divided into an initial *unscheduled* portion followed
-  by a *scheduled* portion. The unscheduled portion of the message may be
-  transmitted unilaterally by the sender, but the receiver
-  controls the transmission of the scheduled portion by sending *grants*.
+  are *unscheduled*: they may be transmitted in their entirety by senders
+  without any flow control. Longer messages are *scheduled*: the sender
+  notifies the receiver of the message's existence, then the receiver
+  controls the transmission of the message by sending *grants*. Scheduled
+  messages pay an extra 1 RTT of latency before transmission of data can
+  begin.
 
 * Homa prioritizes shorter messages over longer ones. Specifically, it
   attempts to approximate SRPT (Shortest Remaining Processing Time first),
-  which favors messages with fewer bytes remaining to transmit.
-  It does this in several ways:
+  which gives the highest priority to the messages with the fewest bytes
+  remaining to transmit. It does this in several ways:
 
   * Homa takes advantage of the priority queues in datacenter switches,
     arranging for shorter messages to use higher-priority queues.
     The receiver of a message determines the priority for each incoming
     packet of the message (including unscheduled packets).
 
-  * When multiple messages are inbound to a single receiver, the
+  * When a receiver has multiple scheduled messages inbound, the
     receiver uses grants to prioritize shorter messages.
 
   * When transmit queues build on senders, they use SRPT to prioritize outgoing
@@ -254,7 +263,7 @@ client and server.
 **Incoming:**
 : Number of bytes of data in a message that have been authorized to be
   transmitted but have not yet been received. Data is authorized if it is
-  within the unscheduled region of a message or if the receiver has
+  within an unscheduled message or if the receiver has
   transmitted a `GRANT` packet for it. Data is considered "incoming"
   even if the sender has not yet received the grant and/or the data has
   not yet been transmitted.
@@ -293,16 +302,14 @@ always even and increase sequentially in order of creation on the
 client.
 
 **Scheduled Data:**
-: The remainder of a message after the unscheduled data. Transmission
-  of scheduled data is controlled by the receiver issuing
-  grant packets.
+: Data that is transmitted in response to grant packets from the receiver.
 
 **Server:**
 : An entity that receives a Homa request and sends the corresponding
 response. This term may refer to either an application program or the
 corresponding Homa endpoint.
 
-**SRPT (Shortest Remaining Pressing Time):**
+**SRPT (Shortest Remaining Processing Time):**
 : Homa tries to prioritize messages that have the fewest remaining
   bytes to transmit, both on the sender side and the receiver side.
 
@@ -320,9 +327,8 @@ to the entities transmitted on the wire, not TSO frames.
   fabric. Individual hosts connect to TORs.
 
 **Unscheduled Data:**
-: The initial portion of a message, which may be transmitted
-  unilaterally by the sending without waiting for permission
-  from the receiver.
+: Data that is sent unilaterally, without requiring the permission of
+  the receiver.
 
 # Packet Formats
 
@@ -348,11 +354,11 @@ of TCP Segmentation Offload (TSO) implemented by many NICs.
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |          Source Port          |       Destination Port        |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |                             Offset                            |
+   |                            Reserved                           |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |                    Reserved                   |     Type      |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |  Doff |       Reserved        |            Reserved           |
+   |  Doff | Rsvd |      Flags     |            Reserved           |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |           Checksum            |         Urgent Pointer        |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -373,11 +379,6 @@ the machine that sent the packet.
 : Identifier that corresponds to an application-level entity on the
 the machine that receives the packet.
 
-**Offset:**
-: Used only for DATA packets, and only under conditions described
-below; contains the offset within the message of the first byte
-of data in the packet.
-
 **Type:**
 : Type of this packet. Must have one of the following values:
 
@@ -390,15 +391,20 @@ of data in the packet.
      CUTOFFS      21
      NEED_ACK     23
      ACK          24
+     START_MSG    25
 ~~~
 
 **Doff:**
 : Corresponds to the Data Offset field in TCP. Only used by senders
 in order to ensure correct TSO behavior; MUST NOT be used by Homa receivers.
 
+**Flags:**
+: Corresponds to the Flags field in TCP.  Set by Homa during TCP hijacking
+to enable receviers to distinguish Homa-over-TCP packets from genuine TCP
+packets.
+
 **Checksum:**
-: Corresponds to the Checksum field in TCP. Not used by Homa, but may
-be modified by NICs during TSO.
+: Corresponds to the Checksum field in TCP. Set by Homa during TCP hijacking.
 
 **Urgent Pointer:**
 : Corresponds to the Urgent Pointer in TCP. Set by Homa during TCP
@@ -411,6 +417,12 @@ from genuine TCP packets.
 **S:**
 : If the low-order bit of the Rpcid is 0 it means that the packet was sent
 by the client for the RPC; 1 means it was sent by the server.
+
+*We are in the process of changing the protocol so that Homa packets
+are encapsulated in UDP packets with a reserved destination port number.
+Once that protocol change is complete, the format of the common header will
+shrink and simplify, since it will no longer need to match TCP headers.
+TCP hijacking will also be eliminated.*
 
 ## DATA packets {#secDataPkt}
 
@@ -427,11 +439,9 @@ The structure of a Homa data packet is specified by {{dataPkt}} below:
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |                         Message Length                        |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |                           Incoming                            |
+   |                        Ack Rpcid (high)                       |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |                           Ack Rpcid (high)                    |
-   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |                           Ack Rpcid (low)                     |
+   |                        Ack Rpcid (low)                        |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |        Ack Server Port        |         Cutoff Version        |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -458,10 +468,6 @@ The following fields follow the common header:
 **Message Length:**
 : The total length of the message in bytes. This MUST be the same in
 every data packet for the message.
-
-**Incoming:**
-: The total number of initial bytes of the message that the sender
-will transmit without receiving additional grants.
 
 **Ack Rpcid:**
 : Identifies another RPC for which the sender is client and the receiver is
@@ -494,6 +500,33 @@ contains the entire request; it is transmitted from client to server and
 has an `S` bit of zero and a zero `Offset`. The second packet is transmitted
 from server to client; it has an `S` bit of one, and a zero `Offset`.
 
+## START_MSG packets {#secStartMessagePkt}
+
+`START_MSG` packets are used by senders to initiate the transfer of
+scheduled messages; they notify the receiver that there is an inbound
+message available and that the receiver should issue grants for it.
+The structure of a `START_MSG` packet is specified by {{startMessagePkt}}
+below:
+
+~~~
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                         Common Header                         |
+   |                               .                               |
+   |                               .                               |
+   |                               .                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                         Message Length                        |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+~~~
+{: #startMessagePkt title="Format of START_MESSAGE packets"}
+
+A `START_MSG` packet contains a common header followed by the following field:
+
+**Message Length:**
+: The total length of the message, in bytes.
+
 ## GRANT packets {#secGrantPkt}
 
 `GRANT` packets are used to manage network queue lengths when multiple
@@ -511,8 +544,8 @@ a grant packet is specified by {{grantPkt}} below:
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |                             Offset                            |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |    Priority   |   Resend All  |
-   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |    Priority   |
+   +-+-+-+-+-+-+-+-+
 ~~~
 {: #grantPkt title="Format of GRANT packets"}
 
@@ -521,20 +554,16 @@ A `GRANT` packet contains a common header followed by the following fields:
 **Offset:**
 : The recipient of the `GRANT` packet is now entitled to transmit all of the
 data in the message given by the `Rpcid` common header field up to (but not
-including this offset).
+including) this offset.
 
 **Priority:**
 : The recipient should use the value of this field as the priority in all
 future `DATA` packets transmitted for this message.
 
-**Resend All:**
-: If this field is non-zero, then the recipient should resend the entire
-message starting at the beginning, up to `Offset`.
-
 ## RESEND packets {#secResendPkt}
 
 A Homa endpoint sends `RESEND` packets when message data that it is expecting
-to receive is overdue and likely lost. The structure of a `RESEND` packet is
+to receive is overdue and possibly lost. The structure of a `RESEND` packet is
 specified by {{resendPkt}} below:
 
 ~~~
@@ -561,7 +590,9 @@ A `RESEND` packet contains a common header followed by the following fields:
 : The offset within the message of the first byte of data to retransmit.
 
 **Length:**
-: The number of bytes to retransmit.
+: The number of bytes to retransmit. -1 means that the sender has not
+received any data for the message, so the receiver should retransmit
+all data that it has previously transmitted.
 
 **Priority:**
 : The priority to use for all packets retransmitted in response to
@@ -570,27 +601,38 @@ this request.
 ## RPC_UNKNOWN packets {#secUnknownPkt}
 
 A Homa endpoint sends a packet with type `RPC_UNKNOWN` when it receives a
-`RESEND` packet with an Rpcid that is uknonwn to it (i.e. the endpoint
+`RESEND` packet with an Rpcid that is unknown to it (i.e. the endpoint
 has no outbound message for that Rpcid). An `RPC_UNKNOWN` packet consists of
 a common header with no additional information.
 
-*This description needs work: `RPC_UNKNOWN` packets should only be issued by
-clients, and it's unclear that these packets are needed at all (replace
-with `ACK`s or just ignore?).*
-
 ## BUSY packets {#secBusyPkt}
 
-Packets with type `BUSY` are sent by servers when they receive a
-`RESEND` packet for the response message but the response message is
-not yet ready, either because the request has not been fully received
-or because the application has not yet generated a response.
-`BUSY` packets are not sent by clients.
+Packets with type `BUSY` are sent by an endpoint when it is unable or
+unwilling to perform an action expected by the receiving endpoint.  A `BUSY`
+packet indicates that the sending endpoint is alive and well and will
+eventually get around to the expected action, so the receiver
+should not time out the RPC. There are currently three situations where
+`BUSY` packets are issued:
+
+* When the server for an RPC receives a `RESEND` request for the response
+  message, but the response message is not yet available.
+
+* When an endpoint receives a `RESEND` request for message data that is
+  available, but it has chosen not to transmit the data because of its
+  SRPT policy.
+
+* When a server receives a duplicate `START_MSG` request for an RPC.
+  A client sends a duplicate `START_MSG` if it fails to receive any grants
+  for a new message within a reasonable time frame (in case the `START_MSG`
+  was lost). The server may not have sent grants yet because of its
+  SRPT policy.
+
 A `BUSY` packet consists entirely of the common header.
 
 ## CUTOFFS packets {#secCutoffsPkt}
 
 Packets with type `CUTOFFS` specify how the recipient should
-assign priorities for unscheduled packets in the future
+assign priorities for unscheduled messages in the future
 (see {{secUnsched}} for details). The structure of
 a `CUTOFFS` packet is specified by {{cutoffsPkt}} below:
 
@@ -629,18 +671,18 @@ equal to the largest allowable message length.
 **Cutoff Version:**
 : Identfies this particular choice of cutoffs; the `CUTOFFS` recipient
 MUST include this value as the `Cutoff Version` in all
-future `DATA` packets sent to the `CUTOFFS` sender (allows the sender to
+future `DATA` packets sent to the `CUTOFFS` sender (this allows the sender to
 detect when cutoffs need to be updated).
 
 ## NEED_ACK packets {#secNeedAckPkt}
 
 A `NEED_ACK` packet is sent from the server for an RPC to the client.
 It indicates that the server has transmitted all of the data in the
-response message for `Rpcid` and would like to reclaim its state for
+response message for an RPC and would like to reclaim its state for
 that RPC. However, it cannot do so until the client has acknowledged
 receiving the entire response. If the client is no longer waiting for
-the indicated Rpcid (or if the Rpcid is unknown), it MUST respond with
-an `ACK` packet that includes the Rpcid. If the client has not yet
+the indicated `Rpcid` (or if the `Rpcid` is unknown), it MUST respond with
+an `ACK` packet that includes the `Rpcid`. If the client has not yet
 received the full response, it need not respond to the `NEED_ACK` packet
 (but it SHOULD issue a `RESEND` for any unreceived bytes).
 
@@ -702,6 +744,9 @@ the common header:
 **Ack Server Port:**
 : The server port associated with `Ack Rpcid`.
 
+*It does not appear that Acks need to include a `Server Port. This field
+should probably be eliminated.*
+
 # Policy Considerations for Grants {#secGrants}
 
 The policy for issuing grants (which messages to grant at any given time and
@@ -709,17 +754,15 @@ how much to grant to each message) involves complex considerations and has
 a significant impact on message latency and throughput, network link
 utilization, buffer occupancy in network switches, and packet drops.
 
-The basic lifecycle of a message is as follows:
+The basic lifecycle of a scheduled message is as follows:
 
-* The message sender transmits one or more packets containing unscheduled
-  data. It is possible for the amount of unscheduled data in a message to
-  be zero; in this case the sender transmits a `DATA` packet containing
-  no data (but it will indicate the message length).
+* The message sender transmits a `START_MSG` packet to inform the receiver
+  of the message. The packet also includes the message's length.
 
-* Once the first `DATA` packet has been received, the receiver begins
-  issuing grants for the scheduled bytes of the message.
+* Once the `START_MSG` packet has been received, the receiver begins
+  issuing grants for the bytes of the message.
 
-* As grants arrive at the sender, it transmits additional data packets. As
+* As grants arrive at the sender, it transmits data packets. As
   these packets are received, the receiver issues additional grants, until
   eventually the entire message has been transmitted.
 
@@ -731,8 +774,10 @@ referred to as the *incoming* for the message. A byte is considered to
 have been granted once the `GRANT` packet has been transmitted by the
 receiver,  even if the grant has not yet been received by the sender and/or
 the packet containing the byte has not been transmitted by the sender.
-Unscheduled data has been implicitly granted, so it is included in the
-message's incoming as soon as the first `DATA` packet arrives at the receiver.
+
+Incoming data also includes unscheduled messages. If a message is
+unscheduled, any of its bytes not yet received at the receiver
+are treated as "incoming".
 
 The term *total incoming* refers to the sum of the incomings of all messages
 known to an endpoint.
@@ -767,18 +812,17 @@ with moderate loads, median round-trip times are likely to be at least
 30-50 μs, with 99th-percentile times of 100-300 μs [HomaLinux].
 If we assume a round-trip time of 100 μs in order to ensure consistently
 high throughput under load, with a link speed of 100 Gbps, then the
-incoming for a message (and also the amount of unscheduled data) must
-be at least 1.25 Mbytes. As discussed below, buffer occupancy
-considerations may make this amount impractical.
+incoming for a message must be at least 1.25 Mbytes. As discussed below,
+buffer occupancy considerations may make this amount impractical.
 
 ## SRPT and Overcommitment
 
 Grants play an important role in implementing SRPT. If a receiver has
 multiple inbound messages, it MUST use grants to prioritize messages
-with fewer remaining bytes to transmit.
+with the fewest remaining bytes to transmit.
 
-The simplest approach is to issue grants only to the highest priority
-message, allowing that message to consume its entire link bandwidth. Then,
+One simple approach is to issue grants only to the single highest priority
+message, allowing that message to consume the entire downlink bandwidth. Then,
 once the highest priority message is completely granted, the receiver can
 issue grants to the next higher priority message, and so on. If a new
 message begins arriving and has fewer remaining bytes than the current
@@ -847,7 +891,7 @@ full usage of the sender's uplink.
 ## FIFO grants
 
 The SRPT policy has been shown to result in low latencies across almost
-all message lengths [Homa] [HomaLinux]. Although the latency benefits are
+all message lengths {{Homa}} {{HomaLinux}}. Although the latency benefits are
 greatest for short messages, Homa also reduces latencies for
 long messages when compared to the "fair sharing" approach used in TCP.
 This is because SRPT results in "run to completion" behavior. Once a
@@ -893,7 +937,7 @@ for all subsequent packets in the associated message until the next
 has direct control over the priority for each scheduled packet. When a
 receiver grants to multiple inbound messages at once, it SHOULD assign
 a different priority for each message (highest priority for the message
-with the least remaining bytes to transmit). This ensures that when
+with the fewest remaining bytes to transmit). This ensures that when
 multiple senders transmit simultaneously and the receiver's TOR link
 is overcommitted, packets from the highest priority message will be
 transmitted and packets for other messages will be queued in the TOR.
@@ -1013,8 +1057,9 @@ not sufficient because all of the packets of the request message may be
 lost. If this happens the server will have no knowledge of the RPC and
 cannot issue `RESEND`s. However, the client will eventually
 send a `RESEND` for the response. If a `RESEND` arrives at a server
-for an unknown RPC, then the server MUST issue a `RESEND` for the initial
-part of the request message. A server MAY choose not to set its own
+for an unknown RPC, then the server MUST issue an `RPC_UNKNOWN` packet.
+On receipt of the `RPC_UNKNOWN`, the client retransmits everything
+it has previsouly sent. A server MAY choose not to set its own
 timers and to rely entirely on `RESEND` requests sent by clients.
 
 Choosing the *resend interval* (how long to wait for expected data before
@@ -1034,7 +1079,8 @@ issuing `RESEND`s) involves a tradeoff among several considerations:
   so the resend interval should be large enough to cover most service
   times.
 
-*Mention the resend interval in the Linux kernel implementation?*
+In the Linux kernel implementation of Homa, the resend interval is
+currently 5 ms.
 
 ## Avoiding unnecessary RESENDs
 
@@ -1052,18 +1098,18 @@ endpoints SHOULD NOT send extraneous `RESEND`s. Here are a few examples:
 ## Responding to RESENDs
 
 When an endpoint receives a `RESEND` packet it MUST respond in order to prevent
-timeouts at the receiver. It MAY respond in either of three ways:
+timeouts at the packet's sender. It MAY respond in either of three ways:
 
 * The endpoint receiving the `RESEND` MAY retransmit the range of bytes
   requested in the `RESEND` packet (it MUST set the `Retrans` flag in each
   retransmitted DATA packet).
 
-* The endpoint receiving the `RESEND` MAY respond with a `RESEND`. This happens
-  if the receiver of the `RESEND` is the server for the RPC, but it has
-  received no DATA packets for the request.
+* The endpoint receiving the `RESEND` MAY respond with `RPC_UNKNOWN`. This
+  happens if the receiver of the `RESEND` is the server for the RPC, but it has
+  not yet received any packets for the RPC (either `DATA` or `START_MSG`).
 
 * The endpoint receiving the `RESEND` MAY respond with a BUSY packet. This
-  indicates that the recipient of a `RESEND` is alive and aware of the message but is not
+  indicates that the recipient of the `RESEND` is alive and aware of the message but is not
   yet prepared to transmit the requested data. This can happen if a server
   receives a `RESEND` for an RPC's response at a time when it has received
   the entire request but the RPC is still being serviced so the response
@@ -1074,12 +1120,12 @@ timeouts at the receiver. It MAY respond in either of three ways:
 ## Timeouts
 
 If an endpoint issues multiple `RESEND` packets for an RPC and receives no
-response from the peer endpoint, the peer is considered to have timed out.
+response from the peer endpoint, the peer is considered to have failed.
 When this happens, all RPCs involving that endpoint SHOULD be aborted.
 
 An endpoint SHOULD NOT delete per-peer state for a timed-out endpoint,
 such as unscheduled priority cutoffs. This is because the peer might
-not have actually crashed. It is possible that the timeout occured
+not have actually crashed. It is possible that the timeout occurred
 because of a disruption in communication, but the peer is still alive
 and will eventually resume communication.
 
@@ -1087,8 +1133,17 @@ An endpoint SHOULD NOT timeout a peer until multiple `RESEND` packets
 have been issued with no response. This is because any given `RESEND`
 packet could potentially be lost. Timeouts are expected to be infrequent
 and the consequences of a timeout are relatively severe, so it is
-better to wait long enough to be quite certain that the peer has
+better to wait long enough to be certain that the peer has
 crashed or is unreachable.
+
+## Retransmitting `START_MSG` Packets
+
+If an endpoint transmits a `START_MSG` packet for a scheduled message
+and receives no `GRANT` packets for that message, it must eventually
+retransmit the `START_MSG` packet, in case the original `START_MSG`
+was lost. If an endpoint receives a `START_MSG` packet for a message
+that it is already aware of, it should transmit either a `GRANT` or
+`BUSY` packet in response.
 
 # At-Most-Once Semantics {#secAcks}
 
@@ -1189,8 +1244,8 @@ entirely by network transport.
 Homa endpoints MUST implement an SRPT policy for packet transmission,
 where packets from short messages are given priority for transmission
 over those from long messages. However, few if any NICs  support a notion
-of transmit priority: packets will be transmitted in the order in which
-they were enqueued at the NIC. If a long queue of transmit packets
+of transmit priority: packets will be transmitted (roughly) in the order
+in which they were enqueued at the NIC. If a long queue of transmit packets
 builds up in the NIC, then a new packet for a short
 message will suffer head-of-line blocking in the NIC transmit queue.
 Homa endpoints MUST attempt to reduce head-of-line blocking delays in
@@ -1199,18 +1254,17 @@ the NIC for short messages.
 To prevent head-of-line blocking delays in NICs that do not support
 priorities, Homa endpoints MUST limit the buildup of transmit queues
 in the NIC. One way to do this is with a *pacer*, which throttles the
-rate at which packets are enqueued in the NIC.  As a result, if there
-is a large accumulation of outbound packets it occurs in the internal
-queue(s) of the
-Homa endpoint, not in the NIC.  The Homa endpoint can manage its
-internal queues according to SRPT so that short messages are not
+rate at which packets are enqueued in the NIC so that it doesn't exceed
+the link speed.  If a large number of outbound packets arrive suddenly,
+most of them will be queued in the pacer, not in the NIC.  The pacer
+queue can be managed with SRPT so that short messages are not
 delayed by long ones.
 
 Here are some considerations for the design of the pacing mechanism:
 
 * The timing of a software pacing mechanism is not perfectly predictable
   (e.g., the pacer could be delayed by interrupts)
-  so the pacer must build up a small queue in the NIC in
+  so the pacer must allow a small queue in the NIC in
   order to keep the uplink fully utilized if the pacer is momentarily
   non-responsive. In the Linux kernel implementation, 5 μs worth of data seems
   to be adequate.
@@ -1221,9 +1275,54 @@ Here are some considerations for the design of the pacing mechanism:
   Homa performance.
 
 * The pacer should limit output to just slightly less than the network
-  bandiwidth in order to be safe. If it errs and generates output at
+  bandwidth in order to be safe. If it errs and generates output at
   a rate even slightly higher than the network bandwidth, long queues
   will build up in the NIC during bursts of high load.
+
+* Unfortunately, NICs cannot always transmit packets at full link speed;
+  for example, measurements of 100 Gbps Intel NICs in December 2025 showed
+  NIC output as low as 80% of link bandwidth even with a large backlog of
+  (mixed-size) output packets. As a result, with this approach alone NIC
+  queues frequently build up (measurements showed total NIC backlogs of
+  5 MB or more under high network load). If the pacing rate is reduced to
+  a level where the NIC can always keep up, it would sacrifice link bandwidth
+  in the normal case where the NIC can transmit at line rate.
+
+* Thus the Linux kernel implementation of Homa also uses a second approach,
+  which is based on information maintained by the Linux dynamic queue limits
+  mechanism (DQL). DQL keeps counters that indicate how many bytes of
+  packet data are in the NIC's possession (i.e. packets that have been passed
+  to the NIC but not yet returned after transmission). If the number of
+  outstanding bytes exceeds a limit then the NIC is considered congested and
+  Homa will stop queuing more packets until the congestion subsides.
+  Measurements in January 2026 indicate that this reduces worst-case total
+  NIC queuing by 2-3x.
+
+* It might seem that the second approach is sufficient by itself, so the
+  first approach is not needed. Unfortunately there can be a significant lag
+  (10's of μsecs) between when a packet is transmitted and when the DQL
+  counters get updated. In order to keep the NIC running at line rate,
+  The NIC must be allowed to buffer enough data to cover that lag (40 μsecs as
+  of May 2026); this means that outgoing packets can be queued for as much
+  as 40 μsecs. In contrast, the rate-based pacing mechanism can limit
+  NIC buffers to about 5 μsecs, which provides a much tighter bound on NIC
+  queue length. Thus, tail latency for short messages is minimized with a
+  dual approach: the time-based pacing mechanism keeps the NIC queue very
+  short in the normal case where the NIC can transmit at full link speed,
+  and the DQL-based mechanism limits queue buildup in situations where the
+  NIC can't transmit at full link speed. Measurements in May 2026 indicate
+  that disabling either of these techniques increases P99 latency for
+  short messages by 10-15%.
+
+* It may make sense for the shortest packets to bypass the pacing mechanism
+  completely (transmit them immediately without checking for NIC congestion).
+  This is done in the Linux kernel implementation because (a)  it reduces tail
+  latency significantly for short packets, (b) modern machines cannot
+  generate enough short packets to cause NIC queue buildup, and (c) the
+  the mechanism for transmitting deferred packets is implemented in a single
+  thread, which doesn't have enough throughput to handle all the short
+  packets at high load (whereas the normal processing for packets that are
+  not deferred happens concurrently on multiple cores).
 
 When implementing an SRPT policy for packet transmission, Homa
 endpoints MAY choose to reserve a small amount of outbound
@@ -1254,14 +1353,14 @@ Homa gives receivers considerable control over their incoming
 traffic, and thus over buffer buildup. However, queuing at TOR
 downlinks can still happen in 2 ways:
 
-* Unscheduled packets. Senders can transmit the initial bytes of messages
+* Unscheduled messages. Senders can transmit unscheduled messages
   without receiving permission in advance from receivers. This feature
   provides a significant latency benefit, but it carries the risk of
   buffer buildup. There is no limit to how many senders
-  can transmit unscheduled packets to the same receiver at once.
+  can transmit unscheduled messages to the same receiver at once.
 
-* Granted packets. Receivers intentionally issue grants to multiple
-  incoming messages at once (overcommitment); this will result in
+* Overcommitment. Receivers intentionally issue grants to multiple
+  incoming messages at once; this will result in
   buffer buildup in the switch. The buffer buildup from granted packets
   is limited by the degree of overcommitment: as discussed previously
   in {{secGrants}}, the
@@ -1280,7 +1379,7 @@ Network switches SHOULD configured in 2 ways to reduce the likelihood of
 buffer overflows for Homa:
 
 * Buffer space within a switch SHOULD be shared dynamically across
-  egress ports as much as possible, rather than statically allocating
+  egress ports, rather than statically allocating
   space to each port. This is particularly important for the TOR
   downlinks: when incast occurs at one port, there will be other
   ports that are underutilized. It is unlikely that there will be large
@@ -1306,15 +1405,11 @@ buffer space, it is possible that packet drops may occur for Homa
 at an unacceptably high level. If this happens, Homa can be modified
 in two ways to reduce its buffer utilization.
 
-* Reduce the amount of unscheduled data allowed for each message.
-  Ideally, the amount of unscheduled data should equal the BDP:
-  this allows messages to be transmitted at full network bandwidth
-  when the network is underloaded. Reducing the amount of unscheduled data
-  will introduce a smalll delay for messages that require grants
-  (e.g., if the unscheduled data limit is reduced to 0.6 BDP, then
-  messages needing grants will incur an extra delay of 0.4 RTT)
-  but it will also reduce buffer usage during incast of unscheduled
-  packets.
+* Reduce the amount of maximum allowed size for unscheduled messages.
+  Scheduled messages suffer an additional 1 RTT of delay for the
+  `START_MSG` packet and the first `GRANT` packet before data
+  transmission begins; reducing the maximum unscheduled size will
+  increase the number of messages that pay this additional latency.
 
 * Use grants to limit the total amount of incoming data. To do this,
   Homa endpoints SHOULD keep track of their total incoming data,
@@ -1327,17 +1422,14 @@ in two ways to reduce its buffer utilization.
   on throughput, but this impact is likely to be less damaging
   than the impact of frequent packet drops.
 
-*Discuss in detail the approach used in Linux?*
-
 # Acknowledgments
 
 TBD
 
 # Security Considerations
 
-This area is currently almost completely unaddressed in Homa. I
-need help identifying potential threats to consider and/or how
-to think about potential security issues.
+This area is currently almost completely unaddressed in Homa. We would
+welcome help identifying potential threats and other security issues.
 
 # IANA Considerations
 
@@ -1363,29 +1455,17 @@ Linux implementation of Homa) or that may be bugs.
 * Should this document describe details of the Linux implementation?
   This information might be useful to people writing new implementations.
 
-* Check the second and third scenarios for `BUSY` packets in the Linux
-  code; do these still make sense?
-
-* Could `BUSY` packets be eliminated and replaced with empty `DATA`
-  packets?
-
 * Ideally, packet spraying should be used in the switching fabric. However,
   Homa should also be able to spray packets by varying one of the port fields.
 
 * Specify constants, such as largest message length and number of priorities?
 
-* Change so that messages are either entirely unscheduled or entirely
-  scheduled?
-
-* How to determine the limit for unscheduled bytes? Include in CUTOFFS packets?
+* How to determine the limit for unscheduled messages? Include in CUTOFFS packets?
 
 * Change to drive retransmission entirely from the client?
 
-* Discuss TCP hijacking
+* Eliminate all mention of TCP hijacking once the implementation of UDP
+  encapsulation is complete.
 
 --- back
 
-# Acknowledgments
-{:numbered="false"}
-
-TODO acknowledge.
