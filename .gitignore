@@ -15,8 +15,8 @@
 *.tt
 *.out
 
-homa-rfc.html
-homa-rfc.xml
-homa-rfc.txt
+*.html
+*.xml
+*.txt
 notes.txt
 .refcache

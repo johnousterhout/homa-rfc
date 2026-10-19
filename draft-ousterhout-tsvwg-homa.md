@@ -23,7 +23,7 @@ title: "Homa: An RPC Transport Protocol for Datacenters"
 abbrev: "Homa"
 category: info
 
-docname: draft-ousterhout-tsvwg-homa
+docname: draft-ousterhout-tsvwg-homa-latest
 submissiontype: IETF  # also: "independent", "editorial", "IAB", or "IRTF"
 number:
 date:

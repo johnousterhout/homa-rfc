@@ -1,0 +1,29 @@
+#!/bin/bash
+# Wrapper around xml2rfc for Cygwin.
+#
+# i-d-template runs "xml2rfc --v2v3 /dev/stdin -o /dev/stdout" in the
+# middle of a pipeline. Under Cygwin, Python can't open /dev/stdout for
+# writing when stdout is a pipe, so this wrapper substitutes a temporary
+# file for /dev/stdout and copies it to stdout afterward. All other
+# invocations pass straight through to the real xml2rfc.
+
+real="${VENV:?VENV not set}/xml2rfc"
+args=()
+tmp=
+for a in "$@"; do
+    if [ "$a" = /dev/stdout ]; then
+        tmp=$(mktemp)
+        a=$tmp
+    fi
+    args+=("$a")
+done
+
+if [ -z "$tmp" ]; then
+    exec "$real" "${args[@]}"
+fi
+
+"$real" "${args[@]}"
+status=$?
+[ $status -eq 0 ] && cat "$tmp"
+rm -f "$tmp"
+exit $status
