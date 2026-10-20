@@ -1409,12 +1409,12 @@ The following questions are included to invite feedback from interested parties.
 discussion before this document can serve as a complete interoperable
 protocol specification.
 
-## Original questions for discussion
+## Requirement language, policy, and implementation guidance
 
 * How to decide whether to use MUST vs. SHOULD? E.g., if something
   only affects performance but not correctness, is that a SHOULD?
 
-* To what degree should this document discusses policy choices, vs. just
+* To what degree should this document discuss policy choices, vs. just
   the mechanisms? In some cases, such as policies for issuing grants,
   it's not a problem if different endpoints use different policies.
   To what degree should that be reflected here?
@@ -1425,54 +1425,53 @@ protocol specification.
 * Should this document describe details of the Linux implementation?
   This information might be useful to people writing new implementations.
 
-* Ideally, packet spraying should be used in the switching fabric. However,
-  Homa should also be able to spray packets by varying one of the port fields.
+## Encapsulation and wire format
+
+* Which packet-carriage method should this version specify: Homa directly
+  using IP protocol number 146, or Homa over UDP? Could the choice also
+  define packet demultiplexing, checksum handling, address-family behavior,
+  and any required IANA actions? Once UDP encapsulation is complete,
+  should all mention of TCP hijacking be removed?
+
+* What additional rules would independent implementers need for field
+  encoding, the relationship between `Rpcid` and `S`, protocol versioning,
+  malformed packets, and packet-size, path-MTU, or fragmentation behavior?
 
 * Specify constants, such as largest message length and number of priorities?
 
-* How to determine the limit for unscheduled messages? Include in CUTOFFS packets?
+## Loss recovery and endpoint behavior
 
 * Change to drive retransmission entirely from the client?
 
-* Eliminate all mention of TCP hijacking once the implementation of UDP
-  encapsulation is complete.
+* Could sender and receiver state transitions be specified for packet
+  loss, reordering, stale grants and cutoff updates, RESEND ranges,
+  and ACK/NEED_ACK recovery?
 
-## Additional consolidated questions
+## Security and resource limits
 
-1. **Encapsulation:** Which packet-carriage method should this version
-   specify: Homa directly using IP protocol number 146, or Homa over UDP?
-   Could the choice also define packet demultiplexing, checksum handling,
-   address-family behavior, and any required IANA actions?
+* Could contributors help identify appropriate protections against spoofed
+  or replayed packets, forged retransmission or state-release requests,
+  and denial-of-service attacks?
 
-2. **Wire format and endpoint behavior:** What additional rules would
-   independent implementers need for field encoding, the relationship
-   between `Rpcid` and `S`, protocol versioning, malformed packets,
-   message and packet-size limits, and path-MTU or fragmentation behavior?
-   Could sender and receiver state transitions also be specified for
-   packet loss, reordering, stale grants and cutoff updates, RESEND ranges,
-   and ACK/NEED_ACK recovery?
+* What resource bounds and endpoint behavior should be specified for
+  incomplete RPCs, reassembly, outstanding state, and unscheduled traffic?
 
-3. **Security and resource limits:** Could contributors help identify
-   appropriate protections against spoofed or replayed packets, forged
-   retransmission or state-release requests, and denial-of-service
-   attacks? What resource bounds and endpoint behavior should be specified
-   for incomplete RPCs, reassembly, outstanding state, and unscheduled
-   traffic?
+## Congestion, priorities, and deployment
 
-4. **Congestion, fairness, and deployment:** What deployment assumptions
-   should this document make about network congestion and coexistence with
-   non-Homa traffic? Are additional requirements needed for priority
-   mapping, fairness, starvation prevention, or network configuration?
-   Which grant, pacing, and scheduling behaviors are necessary for
-   interoperability, and which are local policy or implementation guidance?
+* What deployment assumptions should this document make about network
+  congestion and coexistence with non-Homa traffic? Are additional
+  requirements needed for priority mapping, fairness, starvation
+  prevention, or network configuration?
 
-5. **Publication scope and remaining design choices:** What publication
-   category and IETF stream are appropriate for this document? Which
-   unresolved choices—such as requirement language, message and priority
-   constants, unscheduled cutoffs, retransmission ownership, packet
-   spraying, and TCP hijacking—should be settled in this specification,
-   and which would be better documented separately? Could the
-   acknowledgments and other remaining editorial details also be
-   finalized before RFC publication?
+* How to determine the limit for unscheduled messages? Include in CUTOFFS packets?
+
+* Ideally, packet spraying should be used in the switching fabric. However,
+  Homa should also be able to spray packets by varying one of the port fields.
+
+## Publication scope
+
+* What publication category and IETF stream are appropriate for this
+  document? Could the acknowledgments and other remaining editorial
+  details also be finalized before RFC publication?
 
 --- back
