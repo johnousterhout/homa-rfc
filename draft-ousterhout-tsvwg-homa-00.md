@@ -1409,6 +1409,36 @@ The following questions are included to invite feedback from interested parties.
 discussion before this document can serve as a complete interoperable
 protocol specification.
 
+## Original questions for discussion
+
+* How to decide whether to use MUST vs. SHOULD? E.g., if something
+  only affects performance but not correctness, is that a SHOULD?
+
+* To what degree should this document discusses policy choices, vs. just
+  the mechanisms? In some cases, such as policies for issuing grants,
+  it's not a problem if different endpoints use different policies.
+  To what degree should that be reflected here?
+
+* How much should this document reflect current hardware and software
+  characteristics?
+
+* Should this document describe details of the Linux implementation?
+  This information might be useful to people writing new implementations.
+
+* Ideally, packet spraying should be used in the switching fabric. However,
+  Homa should also be able to spray packets by varying one of the port fields.
+
+* Specify constants, such as largest message length and number of priorities?
+
+* How to determine the limit for unscheduled messages? Include in CUTOFFS packets?
+
+* Change to drive retransmission entirely from the client?
+
+* Eliminate all mention of TCP hijacking once the implementation of UDP
+  encapsulation is complete.
+
+## Additional consolidated questions
+
 1. **Encapsulation:** Which packet-carriage method should this version
    specify: Homa directly using IP protocol number 146, or Homa over UDP?
    Could the choice also define packet demultiplexing, checksum handling,
@@ -1443,6 +1473,6 @@ protocol specification.
    spraying, and TCP hijacking—should be settled in this specification,
    and which would be better documented separately? Could the
    acknowledgments and other remaining editorial details also be
-   finalized before submission?
+   finalized before RFC publication?
 
 --- back
