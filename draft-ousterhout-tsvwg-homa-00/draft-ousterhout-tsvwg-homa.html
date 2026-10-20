@@ -1,0 +1,3229 @@
+<!DOCTYPE html>
+<html lang="en" class="Internet-Draft">
+<head>
+<meta charset="utf-8">
+<meta content="Common,Greek,Latin" name="scripts">
+<meta content="initial-scale=1.0" name="viewport">
+<title>Homa: An RPC Transport Protocol for Datacenters</title>
+<meta content="John Ousterhout" name="author">
+<meta content="Thiyagarajan Velappan" name="author">
+<meta content="Steven Bagby" name="author">
+<meta content="
+       This document defines the Homa transport protocol. Homa provides
+applications with a reliable and efficient mechanism for delivering
+request and response messages for remote procedure calls (RPCs).
+It is intended for use within datacenters. Homa uses messages,
+receiver-issued grants, and packet priorities to support RPC workloads.
+Published evaluations report a reduction of more than 10x in tail latency
+for short messages relative to TCP for specific workloads
+and test conditions; this document does not claim a performance
+improvement for all datacenter environments. 
+    " name="description">
+<meta content="xml2rfc 3.34.1" name="generator">
+<meta content="draft-ousterhout-tsvwg-homa-latest" name="ietf.draft">
+<!-- Generator version information:
+  xml2rfc 3.34.1
+    Python 3.14.8
+    ConfigArgParse 1.8.0
+    google-i18n-address 3.1.1
+    intervaltree 3.2.1
+    Jinja2 3.1.6
+    lxml 6.1.1
+    natsort 8.4.0
+    platformdirs 4.13.4
+    pycountry 24.6.1
+    PyYAML 6.0.3
+    requests 2.33.1
+    wcwidth 0.9.2
+-->
+<link href="draft-ousterhout-tsvwg-homa.xml" rel="alternate" type="application/rfc+xml">
+<link href="#copyright" rel="license">
+<style type="text/css">@font-face {
+  font-family: 'Lora';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Lora Italic'), local('Lora-Italic'), url('https://martinthomson.github.io/rfc-css/fonts/lora-italic-cyrillic-ext.woff2') format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C88, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Lora Italic'), local('Lora-Italic'), url('https://martinthomson.github.io/rfc-css/fonts/lora-italic-cyrillic-ext.woff2') format('woff2');
+  unicode-range: U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Lora Italic'), local('Lora-Italic'), url('https://martinthomson.github.io/rfc-css/fonts/lora-italic-vietnamese.woff2') format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+1EA0-1EF9, U+20AB;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Lora Italic'), local('Lora-Italic'), url('https://martinthomson.github.io/rfc-css/fonts/lora-italic-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Lora Italic'), local('Lora-Italic'), url('https://martinthomson.github.io/rfc-css/fonts/lora-italic-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Lora Regular'), local('Lora-Regular'), url('https://martinthomson.github.io/rfc-css/fonts/lora-regular-cyrillic-ext.woff2') format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C88, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Lora Regular'), local('Lora-Regular'), url('https://martinthomson.github.io/rfc-css/fonts/lora-regular-cyrillic.woff2') format('woff2');
+  unicode-range: U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Lora Regular'), local('Lora-Regular'), url('https://martinthomson.github.io/rfc-css/fonts/lora-regular-vietnamese.woff2') format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+1EA0-1EF9, U+20AB;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Lora Regular'), local('Lora-Regular'), url('https://martinthomson.github.io/rfc-css/fonts/lora-regular-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Lora Regular'), local('Lora-Regular'), url('https://martinthomson.github.io/rfc-css/fonts/lora-regular-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: local('Lora Bold'), local('Lora-Bold'), url('https://martinthomson.github.io/rfc-css/fonts/lora-bold-cyrillic-ext.woff2') format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C88, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: local('Lora Bold'), local('Lora-Bold'), url('https://martinthomson.github.io/rfc-css/fonts/lora-bold-cyrillic.woff2') format('woff2');
+  unicode-range: U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: local('Lora Bold'), local('Lora-Bold'), url('https://martinthomson.github.io/rfc-css/fonts/lora-bold-vietnamese.woff2') format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+1EA0-1EF9, U+20AB;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: local('Lora Bold'), local('Lora-Bold'), url('https://martinthomson.github.io/rfc-css/fonts/lora-bold-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: local('Lora Bold'), local('Lora-Bold'), url('https://martinthomson.github.io/rfc-css/fonts/lora-bold-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: local('Lora SemiBold'), local('Lora-SemiBold'), url('https://martinthomson.github.io/rfc-css/fonts/lora-semibold-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Oxygen Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Oxygen Mono'), local('OxygenMono-Regular'), url('https://martinthomson.github.io/rfc-css/fonts/oxygenmono-regular-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Oxygen Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Oxygen Mono'), local('OxygenMono-Regular'), url('https://martinthomson.github.io/rfc-css/fonts/oxygenmono-regular-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Sofia Sans Semi Condensed';
+  font-style: italic;
+  font-weight: 1 1000;
+  src: url('https://martinthomson.github.io/rfc-css/fonts/sofiasanssemicondensed-italic-cyrillic-ext.woff2') format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: 'Sofia Sans Semi Condensed';
+  font-style: italic;
+  font-weight: 1 1000;
+  src: url('https://martinthomson.github.io/rfc-css/fonts/sofiasanssemicondensed-italic-cyrillic.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Sofia Sans Semi Condensed';
+  font-style: italic;
+  font-weight: 1 1000;
+  src: url('https://martinthomson.github.io/rfc-css/fonts/sofiasanssemicondensed-italic-greek.woff2') format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+@font-face {
+  font-family: 'Sofia Sans Semi Condensed';
+  font-style: italic;
+  font-weight: 1 1000;
+  src: url('https://martinthomson.github.io/rfc-css/fonts/sofiasanssemicondensed-italic-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Sofia Sans Semi Condensed';
+  font-style: italic;
+  font-weight: 1 1000;
+  src: url('https://martinthomson.github.io/rfc-css/fonts/sofiasanssemicondensed-italic-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Sofia Sans Semi Condensed';
+  font-style: normal;
+  font-weight: 1 1000;
+  src: url('https://martinthomson.github.io/rfc-css/fonts/sofiasanssemicondensed-regular-cyrillic-ext.woff2') format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: 'Sofia Sans Semi Condensed';
+  font-style: normal;
+  font-weight: 1 1000;
+  src: url('https://martinthomson.github.io/rfc-css/fonts/sofiasanssemicondensed-regular-cyrillic.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Sofia Sans Semi Condensed';
+  font-style: normal;
+  font-weight: 1 1000;
+  src: url('https://martinthomson.github.io/rfc-css/fonts/sofiasanssemicondensed-regular-greek.woff2') format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+@font-face {
+  font-family: 'Sofia Sans Semi Condensed';
+  font-style: normal;
+  font-weight: 1 1000;
+  src: url('https://martinthomson.github.io/rfc-css/fonts/sofiasanssemicondensed-regular-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Sofia Sans Semi Condensed';
+  font-style: normal;
+  font-weight: 1 1000;
+  src: url('https://martinthomson.github.io/rfc-css/fonts/sofiasanssemicondensed-regular-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+  color-scheme: light dark;
+  --background-color: #fff;
+  --text-color: #222;
+  --title-color: #191919;
+  --link-color: #2a6496;
+  --highlight-color: #f9f9f9;
+  --line-color: #eee;
+  --pilcrow-weak: #ddd;
+  --pilcrow-strong: #bbb;
+  --small-font-size: 14.5px;
+  --font-mono: 'Oxygen Mono', monospace;
+  --font-title: "Sofia Sans Semi Condensed", sans-serif;
+  scrollbar-color: #bbb #eee;
+}
+body {
+  max-width: 600px;
+  margin: 75px auto;
+  padding: 0 5px;
+  color: var(--text-color);
+  background-color: var(--background-color);
+  font: 16px/22px "Lora", serif;
+  scroll-behavior: smooth;
+}
+
+.ears {
+  display: none;
+}
+
+/* headings */
+section {
+  clear: both;
+}
+.section-number {
+  padding-right: 0.5em;
+}
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-title);
+  font-weight: 680;
+  margin: 0.8em 0 0.3em;
+  font-size-adjust: 0.5;
+  color: var(--title-color);
+}
+h1 {
+  &#title {
+    font-size: 32px;
+    line-height: 40px;
+    clear: both;
+    margin: 1.5em 0 0.2em;
+  }
+  &#rfcnum {
+    margin: 1.5em 0 0.2em;
+    & + h1#title {
+      margin: 0.2em 0;
+    }
+  }
+}
+
+h1, h2, h3 {
+  font-size: 22px;
+  line-height: 27px;
+}
+h4, h5, h6 {
+  font-size: 20px;
+  line-height: 24px;
+}
+
+/* general structure */
+.author {
+  padding-bottom: 0.3em;
+  vertical-align: top;
+}
+#abstract+p {
+  font-size: 18px;
+  line-height: 24px;
+  & code, & samp, & tt {
+    font-size: 16px;
+    line-height: 0;
+  }
+}
+
+p {
+  padding: 0;
+  margin: 0.5em 0;
+  text-align: left;
+}
+div {
+  margin: 0;
+}
+.alignRight {
+  margin: 1em 0;
+  &.art-text {
+    background-color: var(--highlight-color);
+    border: 1px solid var(--line-color);
+    border-radius: 3px;
+    padding: 0.5em 1em 0;
+    margin-bottom: 0.5em;
+    & pre {
+      padding: 0;
+      width: auto;
+    }
+  }
+  & > *:first-child {
+    border: none;
+    margin: 0;
+    float: right;
+    clear: both;
+  }
+  & > *:nth-child(2) {
+    clear: both;
+    display: block;
+    border: none;
+  }
+}
+svg {
+  display: block;
+  /* font-family isn't space-separated, but =~ will have to do */
+  &[font-family~="monospace" i], & [font-family~="monospace" i] {
+    font-family: var(--font-mono);
+  }
+}
+.alignCenter {
+  margin: 1em 0;
+  &.art-text {
+    background-color: var(--highlight-color);
+    border: 1px solid var(--line-color);
+    border-radius: 3px;
+    padding: 0.5em 1em 0;
+    margin-bottom: 0.5em;
+    & pre {
+      padding: 0;
+      width: auto;
+    }
+  }
+  & > *:first-child {
+    border: none;
+    /* this isn't optimal, but it's an existence proof.  PrinceXML doesn't
+       support flexbox yet.
+    */
+    display: table;
+    margin: 0 auto;
+  }
+}
+
+/* lists */
+ol, ul {
+  padding: 0;
+  margin: 0 0 0.5em 2em;
+  & :is(ol, ul) {
+    margin-left: 1em;
+  }
+}
+li {
+  margin: 0 0 0.25em 0;
+}
+ul.empty, .ulEmpty {
+  list-style-type: none;
+  & li {
+    margin-top: 0.5em;
+  }
+}
+:is(ul, ol).compact, .ulCompact, .olCompact {
+  margin: 0 0 0 2em;
+  & li {
+    margin: 0;
+    & :first-child { margin-top: 0; }
+    & :last-child { margin-bottom: 0; }
+  }
+}
+
+/* definition lists */
+dl {
+  clear: left;
+  --indent: 3ch;
+  /* --indent: attr(indent ch); not supported in any browser, but we can dream */
+  &.olPercent {
+    --indent: 5ch;
+    & > dt {
+      min-width: calc(var(--indent) - 2ch);
+      float: none;
+    }
+  }
+
+  dl > dd > & {
+    margin-top: 0.5em;
+    margin-bottom: 0;
+  }
+
+  &:not(.dlNewline) > dt {
+    float: left;
+    margin-right: 2ch;
+    min-width: 8ch;
+  }
+  & > dd {
+    margin-bottom: .8em;
+    margin-left: var(--indent) !important; /* stupid element overrides */
+    min-height: 2ex;
+  }
+}
+:is(dl.compact, .dlCompact) > dd {
+  margin-bottom: 0;
+  & > :is(:first-child, .break:first-child + *) {
+    margin-top: 0;
+  }
+  & > :is(:last-child) {
+    margin-bottom: 0;
+  }
+}
+:is(dd, span).break {
+  display: none;
+}
+
+/* links */
+a {
+  text-decoration: none;
+  &[href] {
+    color: var(--link-color);
+    &:hover { text-decoration: underline; }
+    &.selfRef {
+      color: var(--text-color);
+      &:hover {
+        text-decoration: none;
+        background-color: var(--highlight-color);
+      }
+    }
+  }
+}
+.iref + a[href].internal {
+  color: var(--text-color);
+}
+a.xref:is(.cite, .auto), :is(#status-of-memo, #copyright) a {
+  white-space: nowrap;
+}
+
+/* Figures */
+tt, code, pre {
+  background-color: var(--highlight-color);
+  font: 14px/22px var(--font-mono);
+}
+tt, code {
+  /* changing the font for inline elements leads to different ascender
+     and descender heights; as we want to retain baseline alignment,
+     remove leading to avoid altering the final height of lines
+     note: this fails if these blocks take an entire line,
+     a different solution would be great */
+  line-height: 0;
+}
+:is(h1, h2, h3, h4, h5, h6) :is(tt, code) {
+  font-size: 84%;
+}
+pre {
+  border: 1px solid var(--line-color);
+  font-size: 13.5px;
+  line-height: 16px;
+  letter-spacing: -0.2px;
+  margin: 5px;
+  padding: 5px;
+}
+img {
+  max-width: 100%;
+}
+figure {
+  margin: 0.5em 0;
+  padding: 0;
+  & blockquote {
+    margin: 0.8em 0.4em 0.4em;
+  }
+}
+figcaption, caption {
+  font-style: italic;
+  margin: 0.5em 1.5em;
+  text-align: left;
+  caption-side: bottom;
+}
+@media screen {
+  /* Auto-collapse boilerplate. */
+  :is(#status-of-memo, #copyright) {
+    & p {
+      margin: -2px 0;
+      max-height: 0;
+      transition: max-height 2s ease, margin 0.5s ease 0.5s;
+      overflow: hidden;
+    }
+    &:hover p,
+    & h2:target ~ p {
+      margin: 0.5em 0;
+      max-height: 500px;
+      overflow: auto;
+    }
+  }
+  pre, svg {
+    display: inline-block;
+    /* In the horizontal direction, sometimes people make over-sized figures.
+       Scrollbars for those is therefore necessary: auto adds them as necessary..
+       In the vertical direction, the line-height can combine with the font
+       asender/descender height to produce scrollbars: hidden avoids that. */
+    overflow: auto hidden;
+  }
+  pre {
+    max-width: 100%;
+    width: calc(100% - 22px - 1em);
+  }
+  svg {
+    max-width: calc(100% - 22px - 1em);
+  }
+  figure pre {
+    display: block;
+    width: calc(100% - 25px);
+  }
+  :is(pre, svg) + .pilcrow {
+    display: inline-block;
+    vertical-align: text-bottom;
+    padding-bottom: 8px;
+  }
+}
+
+/* aside, blockquote */
+aside, blockquote {
+  margin-left: 0;
+  padding: 0 2em;
+  font-style: italic;
+}
+blockquote {
+  margin: 1em 0;
+  border-left: 2px var(--pilcrow-strong) solid;
+}
+cite {
+  display: block;
+  text-align: right;
+  font-style: italic;
+}
+
+/* tables */
+table {
+  width: auto;
+  max-width: 100%;
+  margin: 0 0 1em;
+  border-collapse: collapse;
+  &.right { margin-left: auto; }
+  &.center { margin-left: auto; margin-right: auto; }
+  &.left { margin-right: auto; }
+  & .text-left { text-align: left; }
+  & .text-center { text-align: center; }
+  & .text-right { text-align: right; }
+  & caption {
+    margin: 0;
+    padding: 3px 0 3px 1em;
+  }
+  & p { margin: 0; }
+}
+
+thead, tbody {
+  border: 1px solid var(--line-color);
+}
+th, td {
+  text-align: left;
+  vertical-align: top;
+  padding: 5px 10px;
+}
+th {
+  background-color: var(--line-color);
+}
+:is(tr:nth-child(2n), thead+tbody > tr:nth-child(2n+1)) > td {
+  background-color: var(--background-color);
+}
+:is(tr:nth-child(2n+1), thead+tbody > tr:nth-child(2n)) > td {
+  background-color: var(--highlight-color);
+}
+
+/* pilcrow */
+a.pilcrow {
+  margin-left: 3px;
+  opacity: 0.2;
+  user-select: none;
+  &[href] {
+    color: var(--pilcrow-weak);
+    &:hover { text-decoration: none; }
+  }
+  @media not print {
+    :hover > &, &:focus {
+      opacity: 1;
+    }
+    &[href]:hover {
+      color: var(--pilcrow-strong);
+      background-color: transparent;
+    }
+  }
+  @media print {
+    display: none;
+  }
+}
+
+/* misc */
+hr {
+  border: 0;
+  border-top: 1px solid var(--line-color);
+}
+.bcp14 {
+  font-variant: small-caps;
+  font-weight: 600;
+  font-size: var(--small-font-size);
+}
+.role {
+  font-variant: all-small-caps;
+}
+sub, sup {
+  line-height: 1;
+  font-size: 80%;
+}
+
+/* info block */
+#identifiers {
+  margin: 0;
+  font-size: var(--small-font-size);
+  line-height: 18px;
+  --identifier-width: 15ch;
+  & dt {
+    width: var(--identifier-width);
+    min-width: var(--identifier-width);
+    clear: left;
+    float: left;
+    text-align: right;
+    margin-right: 1ch;
+  }
+  & dd {
+    margin: 0;
+    margin-left: calc(1em + var(--identifier-width)) !important;
+    min-width: 5em;
+  }
+  & .authors {
+    & .author {
+      display: inline-block;
+      margin-right: 1.5em;
+    }
+    & .org {
+      font-style: italic;
+    }
+  }
+}
+
+/* The prepared/rendered info at the very bottom of the page */
+.docInfo {
+  color: #999;
+  font-size: 0.9em;
+  font-style: italic;
+  margin-top: 2em;
+  & .prepared {
+    float: right;
+  }
+}
+
+/* table of contents */
+#toc {
+  padding: 0.75em 0 2em 0;
+  margin-bottom: 1em;
+
+  & nav {
+    & ul {
+      margin: 0 0.5em 0 0;
+      padding: 0;
+      list-style: none;
+    }
+    & li {
+      line-height: 1.3em;
+      margin: 2px 0;
+      padding-left: 1.2em;
+      text-indent: -1.2em;
+    }
+  }
+  & a.xref {
+    white-space: normal;
+  }
+}
+
+.references {
+  & > dt {
+    text-align: right;
+    font-weight: bold;
+    min-width: 10ch;
+    margin-right: 1.5ch;
+    &:target::before {
+      content: "⇒";
+      margin: 0 10px 0 -25px;
+    }
+  }
+  & > dd {
+    margin-left: 12ch !important;
+    overflow: visible;
+    & .refInstance {
+      margin-bottom: 0.8em;
+    }
+    & .ascii {
+      margin-bottom: 0.25em;
+    }
+  }
+}
+
+#rfc\.index\.index + ul {
+  margin-left: 0;
+}
+
+/* authors */
+address.vcard {
+  font-style: normal;
+  max-width: 20em;
+  margin: 1em auto 1em 0;
+
+  & .nameRole {
+    font-weight: 700;
+    margin-left: 0;
+  }
+  & .label {
+    margin: 0.5em 0;
+  }
+  & .type {
+    display: none;
+  }
+  & .alternative-contact {
+    margin: 0.5em 0 0.25em 0;
+  }
+  & .non-ascii {
+    margin: 0 0 0 2em;
+  }
+  & div.left {
+    text-align: left;
+  }
+  & div.right {
+    text-align: right;
+  }
+}
+
+hr.addr {
+  border-top: 1px dashed;
+  margin: 0;
+  color: #ddd;
+  max-width: calc(100% - 16px);
+}
+@media (min-width: 500px) {
+  #authors-addresses {
+    & > section {
+      column-count: 2;
+      column-gap: 20px;
+    }
+    & > section > h2 {
+      column-span: all;
+    }
+    /* hack for break-inside: avoid-column */
+    & address {
+      display: inline-block;
+      break-inside: avoid-column;
+    }
+  }
+}
+
+/* Comments */
+.rfcEditorRemove {
+  & p:first-of-type {
+    font-style: italic;
+  }
+}
+.cref {
+  background-color: rgba(249, 232, 105, 0.3);
+  padding: 2px 4px;
+}
+.crefSource {
+  font-style: italic;
+}
+
+@media screen {
+  #toc {
+    & nav {
+      font-family: var(--font-title);
+      font-weight: 360;
+      & > ul { margin-bottom: 2em; }
+      & ul {
+        margin: 0 0 0 4px;
+        & :is(p, li) {
+          margin: 2px 0;
+        }
+      }
+    }
+    & a.toplink {
+      float: right;
+    }
+  }
+}
+@media not screen {
+  #toc a.toplink {
+    display: none;
+  }
+}
+
+
+/* TOC layout for smaller screens */
+@media screen and (max-width: 929px) {
+  #toc {
+    position: fixed;
+    z-index: 2;
+    top: 0;
+    right: 0;
+    padding: 1px 0 0 0;
+    margin: 0;
+    border-bottom: 1px solid #ccc;
+    opacity: 0.6;
+    & h2 {
+      margin: 0;
+      padding: 2px 0 2px 6px;
+      padding-right: 1em;
+      font-size: 18px;
+      line-height: 24px;
+      min-width: 190px;
+      text-align: right;
+      background-color: #444;
+      color: white;
+      cursor: pointer;
+      &::before { /* css hamburger */
+        float: right;
+        position: relative;
+        width: 1em;
+        height: 1px;
+        left: -164px;
+        margin: 8px 0 0 0;
+        background: white none repeat scroll 0 0;
+        box-shadow: 0 4px 0 0 white, 0 8px 0 0 white;
+        content: "";
+      }
+    }
+    & nav {
+      display: none;
+      background-color: var(--background-color);
+      padding: 0.5em 1em 1em;
+      overflow: auto;
+      overscroll-behavior: contain;
+      height: calc(100vh - 48px);
+      border-left: 1px solid #ddd;
+    }
+    &.active {
+      opacity: 1;
+      & nav { display: block; }
+    }
+    /* Make the collapsed ToC header render white on gray also when it's a link */
+    & h2 a,
+    & h2 a:is(:link, :focus, :hover),
+    & a.toplink,
+    & a.toplink:hover {
+      color: white;
+      background-color: #444;
+      text-decoration: none;
+    }
+    & a.toplink {
+      margin: 2px 0.5em 0;
+    }
+  }
+}
+
+/* TOC layout for wide screens */
+@media screen and (min-width: 930px) {
+  body {
+    padding-right: 360px;
+    padding-right: calc(min(180px + 20%, 500px));
+  }
+  #toc {
+    position: fixed;
+    bottom: 0;
+    right: 0;
+    right: calc(50vw - 480px);
+    width: 312px;
+    margin: 0;
+    padding: 0;
+    z-index: 1;
+    & h2 {
+      margin: 0;
+      padding: 0.25em 1em 1em 0;
+    }
+    & nav {
+      display: block;
+      height: calc(90vh - 84px);
+      bottom: 0;
+      padding: 0.5em 0 2em;
+      overflow: auto;
+      overscroll-behavior: contain;
+      scrollbar-width: thin;
+    }
+    & a.toplink {
+      margin: 8px 0.5em 0;
+    }
+  }
+  img { /* future proofing */
+    max-width: 100%;
+    height: auto;
+  }
+}
+
+/* pagination */
+@media print {
+  body {
+    width: 100%;
+  }
+  p {
+    orphans: 3;
+    widows: 3;
+  }
+  #n-copyright-notice {
+    border-bottom: none;
+  }
+  #toc {
+    page-break-before: always;
+    border-top: none;
+    padding-top: 0;
+  }
+  #n-introduction {
+    page-break-before: always;
+  }
+  figure, pre, .vcard {
+    page-break-inside: avoid;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    page-break-after: avoid;
+  }
+  :is(h2, h3, h4, h5, h6)+*, dd {
+    page-break-before: avoid;
+  }
+  pre {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-size: 10pt;
+  }
+  table {
+    border: 1px solid #ddd;
+  }
+  td {
+    border-top: 1px solid #ddd;
+  }
+}
+
+@page :first {
+  padding-top: 0;
+  @top-left {
+    content: normal;
+    border: none;
+  }
+  @top-center {
+    content: normal;
+    border: none;
+  }
+  @top-right {
+    content: normal;
+    border: none;
+  }
+}
+
+@page {
+  size: A4;
+  margin-bottom: 45mm;
+  padding-top: 20px;
+}
+
+/* Dark mode. */
+@media (prefers-color-scheme: dark) {
+:root {
+  --background-color: #121212;
+  --text-color: #f0f0f0;
+  --title-color: #fff;
+  --link-color: #4da4f0;
+  --highlight-color: #282828;
+  --line-color: #444;
+  --pilcrow-weak: #444;
+  --pilcrow-strong: #666;
+  scrollbar-color: #777 #333;
+}
+}
+
+/* SVG Trick: a prefix match works because only black and white are allowed */
+svg {
+  & :is([stroke="black"], [stroke^="#000"]) {
+    stroke: var(--text-color);
+  }
+  & :is([stroke="white"], [stroke^="#fff"]) {
+    stroke: var(--background-color);
+  }
+  & :is([fill="black"], [fill^="#000"], :not([fill])) {
+    fill: var(--text-color);
+  }
+  & :is([fill="white"], [fill^="#fff"]) {
+    fill: var(--background-color);
+  }
+}
+</style>
+
+</head>
+<body class="xml2rfc">
+<table class="ears">
+<thead><tr>
+<td class="left">Internet-Draft</td>
+<td class="center">Homa</td>
+<td class="right">October 2026</td>
+</tr></thead>
+<tfoot><tr>
+<td class="left">Ousterhout, et al.</td>
+<td class="center">Expires 23 April 2027</td>
+<td class="right">[Page]</td>
+</tr></tfoot>
+</table>
+<div id="external-metadata" class="document-information"></div>
+<div id="internal-metadata" class="document-information">
+<dl id="identifiers">
+<dt class="label-workgroup">Workgroup:</dt>
+<dd class="workgroup">TSVWG Working Group</dd>
+<dt class="label-internet-draft">Internet-Draft:</dt>
+<dd class="internet-draft">draft-ousterhout-tsvwg-homa-latest</dd>
+<dt class="label-published">Published:</dt>
+<dd class="published">
+<time datetime="2026-10-20" class="published">20 October 2026</time>
+    </dd>
+<dt class="label-intended-status">Intended Status:</dt>
+<dd class="intended-status">Informational</dd>
+<dt class="label-expires">Expires:</dt>
+<dd class="expires"><time datetime="2027-04-23">23 April 2027</time></dd>
+<dt class="label-authors">Authors:</dt>
+<dd class="authors">
+<div class="author">
+      <div class="author-name">J. Ousterhout</div>
+<div class="org">Stanford University</div>
+</div>
+<div class="author">
+      <div class="author-name">T. Velappan</div>
+<div class="org">Mastercard, Inc.</div>
+</div>
+<div class="author">
+      <div class="author-name">S. Bagby</div>
+<div class="org">Mastercard, Inc.</div>
+</div>
+</dd>
+</dl>
+</div>
+<h1 id="title">Homa: An RPC Transport Protocol for Datacenters</h1>
+<section id="section-abstract">
+      <h2 id="abstract"><a href="#abstract" class="selfRef">Abstract</a></h2>
+<p id="section-abstract-1">This document defines the Homa transport protocol. Homa provides
+applications with a reliable and efficient mechanism for delivering
+request and response messages for remote procedure calls (RPCs).
+It is intended for use within datacenters. Homa uses messages,
+receiver-issued grants, and packet priorities to support RPC workloads.
+Published evaluations report a reduction of more than 10x in tail latency
+for short messages relative to TCP for specific workloads
+and test conditions; this document does not claim a performance
+improvement for all datacenter environments.<a href="#section-abstract-1" class="pilcrow">¶</a></p>
+</section>
+<div id="status-of-memo">
+<section id="section-boilerplate.1">
+        <h2 id="name-status-of-this-memo">
+<a href="#name-status-of-this-memo" class="section-name selfRef">Status of This Memo</a>
+        </h2>
+<p id="section-boilerplate.1-1">
+        This Internet-Draft is submitted in full conformance with the
+        provisions of BCP 78 and BCP 79.<a href="#section-boilerplate.1-1" class="pilcrow">¶</a></p>
+<p id="section-boilerplate.1-2">
+        Internet-Drafts are working documents of the Internet Engineering Task
+        Force (IETF). Note that other groups may also distribute working
+        documents as Internet-Drafts. The list of current Internet-Drafts is
+        at <span><a href="https://datatracker.ietf.org/drafts/current/">https://datatracker.ietf.org/drafts/current/</a></span>.<a href="#section-boilerplate.1-2" class="pilcrow">¶</a></p>
+<p id="section-boilerplate.1-3">
+        Internet-Drafts are draft documents valid for a maximum of six months
+        and may be updated, replaced, or obsoleted by other documents at any
+        time. It is inappropriate to use Internet-Drafts as reference
+        material or to cite them other than as "work in progress."<a href="#section-boilerplate.1-3" class="pilcrow">¶</a></p>
+<p id="section-boilerplate.1-4">
+        This Internet-Draft will expire on 23 April 2027.<a href="#section-boilerplate.1-4" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="copyright">
+<section id="section-boilerplate.2">
+        <h2 id="name-copyright-notice">
+<a href="#name-copyright-notice" class="section-name selfRef">Copyright Notice</a>
+        </h2>
+<p id="section-boilerplate.2-1">
+            Copyright (c) 2026 IETF Trust and the persons identified as the
+            document authors. All rights reserved.<a href="#section-boilerplate.2-1" class="pilcrow">¶</a></p>
+<p id="section-boilerplate.2-2">
+            This document is subject to BCP 78 and the IETF Trust's Legal
+            Provisions Relating to IETF Documents
+            (<span><a href="https://trustee.ietf.org/license-info">https://trustee.ietf.org/license-info</a></span>) in effect on the date of
+            publication of this document. Please review these documents
+            carefully, as they describe your rights and restrictions with
+            respect to this document. Code Components extracted from this
+            document must include Revised BSD License text as described in
+            Section 4.e of the Trust Legal Provisions and are provided without
+            warranty as described in the Revised BSD License.<a href="#section-boilerplate.2-2" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="toc">
+<section id="section-toc.1">
+        <a href="#" onclick="scroll(0,0)" class="toplink">▲</a><h2 id="name-table-of-contents">
+<a href="#name-table-of-contents" class="section-name selfRef">Table of Contents</a>
+        </h2>
+<nav class="toc"><ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.1">
+            <p id="section-toc.1-1.1.1" class="keepWithNext"><a href="#section-1" class="auto internal xref">1</a>.  <a href="#name-introduction" class="internal xref">Introduction</a></p>
+<ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.1.2.1">
+                <p id="section-toc.1-1.1.2.1.1" class="keepWithNext"><a href="#section-1.1" class="auto internal xref">1.1</a>.  <a href="#name-background" class="internal xref">Background</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.1.2.2">
+                <p id="section-toc.1-1.1.2.2.1" class="keepWithNext"><a href="#section-1.2" class="auto internal xref">1.2</a>.  <a href="#name-homa-summary" class="internal xref">Homa Summary</a></p>
+</li>
+            </ul>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.2">
+            <p id="section-toc.1-1.2.1"><a href="#section-2" class="auto internal xref">2</a>.  <a href="#name-conventions-and-definitions" class="internal xref">Conventions and Definitions</a></p>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.3">
+            <p id="section-toc.1-1.3.1"><a href="#section-3" class="auto internal xref">3</a>.  <a href="#name-packet-formats" class="internal xref">Packet Formats</a></p>
+<ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.3.2.1">
+                <p id="section-toc.1-1.3.2.1.1"><a href="#section-3.1" class="auto internal xref">3.1</a>.  <a href="#name-data-packets" class="internal xref">DATA packets</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.3.2.2">
+                <p id="section-toc.1-1.3.2.2.1"><a href="#section-3.2" class="auto internal xref">3.2</a>.  <a href="#name-start_msg-packets" class="internal xref">START_MSG packets</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.3.2.3">
+                <p id="section-toc.1-1.3.2.3.1"><a href="#section-3.3" class="auto internal xref">3.3</a>.  <a href="#name-grant-packets" class="internal xref">GRANT packets</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.3.2.4">
+                <p id="section-toc.1-1.3.2.4.1"><a href="#section-3.4" class="auto internal xref">3.4</a>.  <a href="#name-resend-packets" class="internal xref">RESEND packets</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.3.2.5">
+                <p id="section-toc.1-1.3.2.5.1"><a href="#section-3.5" class="auto internal xref">3.5</a>.  <a href="#name-rpc_unknown-packets" class="internal xref">RPC_UNKNOWN packets</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.3.2.6">
+                <p id="section-toc.1-1.3.2.6.1"><a href="#section-3.6" class="auto internal xref">3.6</a>.  <a href="#name-busy-packets" class="internal xref">BUSY packets</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.3.2.7">
+                <p id="section-toc.1-1.3.2.7.1"><a href="#section-3.7" class="auto internal xref">3.7</a>.  <a href="#name-cutoffs-packets" class="internal xref">CUTOFFS packets</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.3.2.8">
+                <p id="section-toc.1-1.3.2.8.1"><a href="#section-3.8" class="auto internal xref">3.8</a>.  <a href="#name-need_ack-packets" class="internal xref">NEED_ACK packets</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.3.2.9">
+                <p id="section-toc.1-1.3.2.9.1"><a href="#section-3.9" class="auto internal xref">3.9</a>.  <a href="#name-ack-packets" class="internal xref">ACK packets</a></p>
+</li>
+            </ul>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.4">
+            <p id="section-toc.1-1.4.1"><a href="#section-4" class="auto internal xref">4</a>.  <a href="#name-policy-considerations-for-g" class="internal xref">Policy Considerations for Grants</a></p>
+<ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.4.2.1">
+                <p id="section-toc.1-1.4.2.1.1"><a href="#section-4.1" class="auto internal xref">4.1</a>.  <a href="#name-achieving-high-throughput" class="internal xref">Achieving high throughput</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.4.2.2">
+                <p id="section-toc.1-1.4.2.2.1"><a href="#section-4.2" class="auto internal xref">4.2</a>.  <a href="#name-srpt-and-overcommitment" class="internal xref">SRPT and Overcommitment</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.4.2.3">
+                <p id="section-toc.1-1.4.2.3.1"><a href="#section-4.3" class="auto internal xref">4.3</a>.  <a href="#name-one-message-per-endpoint" class="internal xref">One message per endpoint</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.4.2.4">
+                <p id="section-toc.1-1.4.2.4.1"><a href="#section-4.4" class="auto internal xref">4.4</a>.  <a href="#name-fifo-grants" class="internal xref">FIFO grants</a></p>
+</li>
+            </ul>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.5">
+            <p id="section-toc.1-1.5.1"><a href="#section-5" class="auto internal xref">5</a>.  <a href="#name-priorities-and-cutoffs" class="internal xref">Priorities and Cutoffs</a></p>
+<ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.5.2.1">
+                <p id="section-toc.1-1.5.2.1.1"><a href="#section-5.1" class="auto internal xref">5.1</a>.  <a href="#name-scheduled-packets" class="internal xref">Scheduled packets</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.5.2.2">
+                <p id="section-toc.1-1.5.2.2.1"><a href="#section-5.2" class="auto internal xref">5.2</a>.  <a href="#name-unscheduled-packets" class="internal xref">Unscheduled packets</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.5.2.3">
+                <p id="section-toc.1-1.5.2.3.1"><a href="#section-5.3" class="auto internal xref">5.3</a>.  <a href="#name-how-many-priority-levels" class="internal xref">How many priority levels?</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.5.2.4">
+                <p id="section-toc.1-1.5.2.4.1"><a href="#section-5.4" class="auto internal xref">5.4</a>.  <a href="#name-priorities-and-overcommitme" class="internal xref">Priorities and overcommitment</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.5.2.5">
+                <p id="section-toc.1-1.5.2.5.1"><a href="#section-5.5" class="auto internal xref">5.5</a>.  <a href="#name-control-packets" class="internal xref">Control packets</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.5.2.6">
+                <p id="section-toc.1-1.5.2.6.1"><a href="#section-5.6" class="auto internal xref">5.6</a>.  <a href="#name-priorities-and-the-switchin" class="internal xref">Priorities and the switching fabric</a></p>
+</li>
+            </ul>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.6">
+            <p id="section-toc.1-1.6.1"><a href="#section-6" class="auto internal xref">6</a>.  <a href="#name-retransmission-and-timeouts" class="internal xref">Retransmission and Timeouts</a></p>
+<ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.6.2.1">
+                <p id="section-toc.1-1.6.2.1.1"><a href="#section-6.1" class="auto internal xref">6.1</a>.  <a href="#name-when-to-issue-resends" class="internal xref">When to issue RESENDs</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.6.2.2">
+                <p id="section-toc.1-1.6.2.2.1"><a href="#section-6.2" class="auto internal xref">6.2</a>.  <a href="#name-avoiding-unnecessary-resend" class="internal xref">Avoiding unnecessary RESENDs</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.6.2.3">
+                <p id="section-toc.1-1.6.2.3.1"><a href="#section-6.3" class="auto internal xref">6.3</a>.  <a href="#name-responding-to-resends" class="internal xref">Responding to RESENDs</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.6.2.4">
+                <p id="section-toc.1-1.6.2.4.1"><a href="#section-6.4" class="auto internal xref">6.4</a>.  <a href="#name-timeouts" class="internal xref">Timeouts</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.6.2.5">
+                <p id="section-toc.1-1.6.2.5.1"><a href="#section-6.5" class="auto internal xref">6.5</a>.  <a href="#name-retransmitting-start_msg-pa" class="internal xref">Retransmitting <code>START_MSG</code> Packets</a></p>
+</li>
+            </ul>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.7">
+            <p id="section-toc.1-1.7.1"><a href="#section-7" class="auto internal xref">7</a>.  <a href="#name-at-most-once-semantics" class="internal xref">At-Most-Once Semantics</a></p>
+<ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.7.2.1">
+                <p id="section-toc.1-1.7.2.1.1"><a href="#section-7.1" class="auto internal xref">7.1</a>.  <a href="#name-discussion" class="internal xref">Discussion</a></p>
+</li>
+            </ul>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.8">
+            <p id="section-toc.1-1.8.1"><a href="#section-8" class="auto internal xref">8</a>.  <a href="#name-pacing" class="internal xref">Pacing</a></p>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.9">
+            <p id="section-toc.1-1.9.1"><a href="#section-9" class="auto internal xref">9</a>.  <a href="#name-managing-buffer-occupancy-i" class="internal xref">Managing Buffer Occupancy in Switches</a></p>
+<ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.9.2.1">
+                <p id="section-toc.1-1.9.2.1.1"><a href="#section-9.1" class="auto internal xref">9.1</a>.  <a href="#name-sources-of-buffer-buildup" class="internal xref">Sources of buffer buildup</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.9.2.2">
+                <p id="section-toc.1-1.9.2.2.1"><a href="#section-9.2" class="auto internal xref">9.2</a>.  <a href="#name-configuring-the-network" class="internal xref">Configuring the network</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.9.2.3">
+                <p id="section-toc.1-1.9.2.3.1"><a href="#section-9.3" class="auto internal xref">9.3</a>.  <a href="#name-dealing-with-inadequate-buf" class="internal xref">Dealing with inadequate buffer space</a></p>
+</li>
+            </ul>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.10">
+            <p id="section-toc.1-1.10.1"><a href="#section-10" class="auto internal xref">10</a>. <a href="#name-acknowledgments" class="internal xref">Acknowledgments</a></p>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.11">
+            <p id="section-toc.1-1.11.1"><a href="#section-11" class="auto internal xref">11</a>. <a href="#name-security-considerations" class="internal xref">Security Considerations</a></p>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.12">
+            <p id="section-toc.1-1.12.1"><a href="#section-12" class="auto internal xref">12</a>. <a href="#name-iana-considerations" class="internal xref">IANA Considerations</a></p>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.13">
+            <p id="section-toc.1-1.13.1"><a href="#section-13" class="auto internal xref">13</a>. <a href="#name-questions-and-unresolved-is" class="internal xref">Questions and Unresolved Issues</a></p>
+<ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.13.2.1">
+                <p id="section-toc.1-1.13.2.1.1"><a href="#section-13.1" class="auto internal xref">13.1</a>.  <a href="#name-requirement-language-policy" class="internal xref">Requirement language, policy, and implementation guidance</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.13.2.2">
+                <p id="section-toc.1-1.13.2.2.1"><a href="#section-13.2" class="auto internal xref">13.2</a>.  <a href="#name-encapsulation-and-wire-form" class="internal xref">Encapsulation and wire format</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.13.2.3">
+                <p id="section-toc.1-1.13.2.3.1"><a href="#section-13.3" class="auto internal xref">13.3</a>.  <a href="#name-loss-recovery-and-endpoint-" class="internal xref">Loss recovery and endpoint behavior</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.13.2.4">
+                <p id="section-toc.1-1.13.2.4.1"><a href="#section-13.4" class="auto internal xref">13.4</a>.  <a href="#name-security-and-resource-limit" class="internal xref">Security and resource limits</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.13.2.5">
+                <p id="section-toc.1-1.13.2.5.1"><a href="#section-13.5" class="auto internal xref">13.5</a>.  <a href="#name-congestion-priorities-and-d" class="internal xref">Congestion, priorities, and deployment</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.13.2.6">
+                <p id="section-toc.1-1.13.2.6.1"><a href="#section-13.6" class="auto internal xref">13.6</a>.  <a href="#name-publication-scope" class="internal xref">Publication scope</a></p>
+</li>
+            </ul>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.14">
+            <p id="section-toc.1-1.14.1"><a href="#section-14" class="auto internal xref">14</a>. <a href="#name-references" class="internal xref">References</a></p>
+<ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.14.2.1">
+                <p id="section-toc.1-1.14.2.1.1"><a href="#section-14.1" class="auto internal xref">14.1</a>.  <a href="#name-normative-references" class="internal xref">Normative References</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.14.2.2">
+                <p id="section-toc.1-1.14.2.2.1"><a href="#section-14.2" class="auto internal xref">14.2</a>.  <a href="#name-informative-references" class="internal xref">Informative References</a></p>
+</li>
+            </ul>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.15">
+            <p id="section-toc.1-1.15.1"><a href="#appendix-A" class="auto internal xref"></a><a href="#name-authors-addresses" class="internal xref">Authors' Addresses</a></p>
+</li>
+        </ul>
+</nav>
+</section>
+</div>
+<div id="introduction">
+<section id="section-1">
+      <h2 id="name-introduction">
+<a href="#section-1" class="section-number selfRef">1. </a><a href="#name-introduction" class="section-name selfRef">Introduction</a>
+      </h2>
+<p id="section-1-1">Homa is a general-purpose transport protocol for use within datacenters.
+It is intended for applications that use remote procedure calls (RPCs),
+in which a request message is sent from a client to a
+server, followed by a response message returned from the server back to the
+client. Homa handles the delivery of the messages and also detects
+server failures.<a href="#section-1-1" class="pilcrow">¶</a></p>
+<p id="section-1-2">Homa differs from TCP <span>[<a href="#RFC9293" class="cite xref">RFC9293</a>]</span> in almost every major aspect of its design:<a href="#section-1-2" class="pilcrow">¶</a></p>
+<ul class="normal">
+<li class="normal" id="section-1-3.1">
+          <p id="section-1-3.1.1">Homa implements messages instead of byte streams.<a href="#section-1-3.1.1" class="pilcrow">¶</a></p>
+</li>
+        <li class="normal" id="section-1-3.2">
+          <p id="section-1-3.2.1">Homa is connectionless.<a href="#section-1-3.2.1" class="pilcrow">¶</a></p>
+</li>
+        <li class="normal" id="section-1-3.3">
+          <p id="section-1-3.3.1">Homa uses receiver-issued grants for flow control and does not depend
+on buffer occupancy as a signal for congestion. These properties
+describe Homa's flow-control mechanism; they do not, by themselves,
+specify congestion control for the switching fabric.<a href="#section-1-3.3.1" class="pilcrow">¶</a></p>
+</li>
+        <li class="normal" id="section-1-3.4">
+          <p id="section-1-3.4.1">Homa does not require in-order packet delivery.<a href="#section-1-3.4.1" class="pilcrow">¶</a></p>
+</li>
+      </ul>
+<p id="section-1-4">These design choices target the latency and message-delivery
+requirements of datacenter RPC workloads. Performance depends on the
+workload and deployment conditions; this document does not claim that
+Homa outperforms TCP in every datacenter environment.<a href="#section-1-4" class="pilcrow">¶</a></p>
+<p id="section-1-5">Note: Homa is not suitable for use in WANs or other environments with
+high latency. Homa is designed under the assumption of round-trip
+times of a few tens of microseconds or less.<a href="#section-1-5" class="pilcrow">¶</a></p>
+<p id="section-1-6">This document defines version 1 of Homa.<a href="#section-1-6" class="pilcrow">¶</a></p>
+<div id="background">
+<section id="section-1.1">
+        <h3 id="name-background">
+<a href="#section-1.1" class="section-number selfRef">1.1. </a><a href="#name-background" class="section-name selfRef">Background</a>
+        </h3>
+<p id="section-1.1-1">TCP has been widely successful, but its byte-stream abstraction and
+in-order delivery can add queuing and head-of-line delays for datacenter
+RPC workloads, particularly when short messages share the network with
+larger transfers. Homa is a clean-slate, message-oriented transport
+designed for applications running in datacenters. It uses
+receiver-issued grants and packet priorities to address these workload
+characteristics. In lab experiments, Homa reduced tail latency for
+short messages in mixed workloads at high network utilization by
+10-100x compared with TCP <span>[<a href="#HomaLinux" class="cite xref">HomaLinux</a>]</span>. These results are specific to
+the evaluated workloads and test conditions; they should not be
+interpreted as a general performance guarantee across datacenter
+deployments.<a href="#section-1.1-1" class="pilcrow">¶</a></p>
+<p id="section-1.1-2">See <span>[<a href="#Homa" class="cite xref">Homa</a>]</span> for more on the rationale for Homa, the original design
+of Homa (which differs somewhat from the protocol described here) and
+early performance measurements. <span>[<a href="#HomaLinux" class="cite xref">HomaLinux</a>]</span> describes the first
+implementation of Homa in Linux, with additional performance
+measurements.<a href="#section-1.1-2" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="homa-summary">
+<section id="section-1.2">
+        <h3 id="name-homa-summary">
+<a href="#section-1.2" class="section-number selfRef">1.2. </a><a href="#name-homa-summary" class="section-name selfRef">Homa Summary</a>
+        </h3>
+<p id="section-1.2-1">This section contains a brief overview of the key features of Homa. The
+features will be discussed in more detail in later sections.<a href="#section-1.2-1" class="pilcrow">¶</a></p>
+<ul class="normal">
+<li class="normal" id="section-1.2-2.1">
+            <p id="section-1.2-2.1.1">Homa ensures reliable and flow-controlled delivery of messages for RPCs.
+For each RPC it delivers a request message from the client to the server
+and a response from the server back to the client.<a href="#section-1.2-2.1.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-1.2-2.2">
+            <p id="section-1.2-2.2.1">Homa is connectionless. Alternatively, each RPC can be thought of as
+a lightweight and short-lived connection that lasts until the RPC response
+has been received by the client.<a href="#section-1.2-2.2.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-1.2-2.3">
+            <p id="section-1.2-2.3.1">There is no ordering among Homa RPCs. Each RPC is processed independently,
+so RPCs may not complete in the same order they were initiated.<a href="#section-1.2-2.3.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-1.2-2.4">
+            <p id="section-1.2-2.4.1">Flow control in Homa is driven from receivers, not senders. Short messages
+are <em>unscheduled</em>: they may be transmitted in their entirety by senders
+without any flow control. Longer messages are <em>scheduled</em>: the sender
+notifies the receiver of the message's existence, then the receiver
+controls the transmission of the message by sending <em>grants</em>. Scheduled
+messages pay an extra 1 RTT of latency before transmission of data can
+begin.<a href="#section-1.2-2.4.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-1.2-2.5">
+            <p id="section-1.2-2.5.1">Homa prioritizes shorter messages over longer ones. Specifically, it
+attempts to approximate SRPT (Shortest Remaining Processing Time first),
+which gives the highest priority to the messages with the fewest bytes
+remaining to transmit. It does this in several ways:<a href="#section-1.2-2.5.1" class="pilcrow">¶</a></p>
+<ul class="normal">
+<li class="normal" id="section-1.2-2.5.2.1">
+                <p id="section-1.2-2.5.2.1.1">Homa takes advantage of the priority queues in datacenter switches,
+arranging for shorter messages to use higher-priority queues.
+The receiver of a message determines the priority for each incoming
+packet of the message (including unscheduled packets).<a href="#section-1.2-2.5.2.1.1" class="pilcrow">¶</a></p>
+</li>
+              <li class="normal" id="section-1.2-2.5.2.2">
+                <p id="section-1.2-2.5.2.2.1">When a receiver has multiple scheduled messages inbound, the
+receiver uses grants to prioritize shorter messages.<a href="#section-1.2-2.5.2.2.1" class="pilcrow">¶</a></p>
+</li>
+              <li class="normal" id="section-1.2-2.5.2.3">
+                <p id="section-1.2-2.5.2.3.1">When transmit queues build on senders, they use SRPT to prioritize outgoing
+packets. In order to prevent NIC queue buildup, which would damage
+SRPT, Homa endpoints generally need to implement packet pacing.<a href="#section-1.2-2.5.2.3.1" class="pilcrow">¶</a></p>
+</li>
+            </ul>
+</li>
+          <li class="normal" id="section-1.2-2.6">
+            <p id="section-1.2-2.6.1">The packets for a message may be delivered out of order, and receivers
+<span class="bcp14">MUST</span> reassemble out-of-order messages without requiring
+retransmission. Homa encourages the use of packet spraying for load
+balancing in the switching fabric.<a href="#section-1.2-2.6.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-1.2-2.7">
+            <p id="section-1.2-2.7.1">Homa receivers are responsible for detecting lost packets and
+requesting retransmission.<a href="#section-1.2-2.7.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-1.2-2.8">
+            <p id="section-1.2-2.8.1">Homa implements "at most once semantics" for RPCs. Among other things,
+this means that the server for an RPC must retain its state for that
+RPC until the client has received the response message. Homa implements
+an <em>acknowledgment</em> mechanism where clients (eventually) inform servers
+that it is safe for them to reclaim RPC state.<a href="#section-1.2-2.8.1" class="pilcrow">¶</a></p>
+</li>
+        </ul>
+</section>
+</div>
+</section>
+</div>
+<div id="conventions-and-definitions">
+<section id="section-2">
+      <h2 id="name-conventions-and-definitions">
+<a href="#section-2" class="section-number selfRef">2. </a><a href="#name-conventions-and-definitions" class="section-name selfRef">Conventions and Definitions</a>
+      </h2>
+<p id="section-2-1">The key words "<span class="bcp14">MUST</span>", "<span class="bcp14">MUST NOT</span>", "<span class="bcp14">REQUIRED</span>", "<span class="bcp14">SHALL</span>", "<span class="bcp14">SHALL NOT</span>", "<span class="bcp14">SHOULD</span>", "<span class="bcp14">SHOULD NOT</span>", "<span class="bcp14">RECOMMENDED</span>", "<span class="bcp14">NOT RECOMMENDED</span>",
+"<span class="bcp14">MAY</span>", and "<span class="bcp14">OPTIONAL</span>" in this document are to be interpreted as
+described in BCP 14 <span>[<a href="#RFC2119" class="cite xref">RFC2119</a>]</span> <span>[<a href="#RFC8174" class="cite xref">RFC8174</a>]</span> when, and only when, they
+appear in all capitals, as shown here.<a href="#section-2-1" class="pilcrow">¶</a></p>
+<p id="section-2-2">Commonly used terms in this document are described below (alphabetical
+order).<a href="#section-2-2" class="pilcrow">¶</a></p>
+<span class="break"></span><dl class="dlParallel" id="section-2-3">
+        <dt id="section-2-3.1"><strong>Acknowledgment:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-2-3.2">
+          <p id="section-2-3.2.1">A token sent from an RPC's client to its server, indicating that it
+is safe for the server to delete its state for the RPC. There are no
+packet-level acknowledgments in Homa.<a href="#section-2-3.2.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-3.3"><strong>Client:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-2-3.4">
+          <p id="section-2-3.4.1">An entity that initiates a Homa RPC: it sends a request message and
+receives the response. This term may refer to either the
+application that initiates the RPC or to the corresponding Homa endpoint.<a href="#section-2-3.4.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-3.5"><strong>Common Header:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-2-3.6">
+          <p id="section-2-3.6.1">The initial bytes of each packet, which have the same format in all
+packets regardless of type.<a href="#section-2-3.6.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-3.7"><strong>Endpoint:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-2-3.8">
+          <p id="section-2-3.8.1">An entity that implements the Homa protocol, typically associated with
+a single network link on a given machine. Endpoints can act as both
+client and server.<a href="#section-2-3.8.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-3.9"><strong>Grant:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-2-3.10">
+          <p id="section-2-3.10.1">A token issued by the receiver for a message, which entitles the
+message sender to transmit all of the bytes of the message up to a
+given offset. The grant also specifies the priority to use in
+the message's data packets.<a href="#section-2-3.10.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-3.11"><strong>Homa:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-2-3.12">
+          <p id="section-2-3.12.1">The transport protocol described by this document. Homa is a name,
+not an acronym.<a href="#section-2-3.12.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-3.13"><strong>Incoming:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-2-3.14">
+          <p id="section-2-3.14.1">Number of bytes of data in a message that have been authorized to be
+transmitted but have not yet been received. Data is authorized if it is
+within an unscheduled message or if the receiver has
+transmitted a <code>GRANT</code> packet for it. Data is considered "incoming"
+even if the sender has not yet received the grant and/or the data has
+not yet been transmitted.<a href="#section-2-3.14.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-3.15"><strong>Maximum Transmission Unit (MTU):</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-2-3.16">
+          <p id="section-2-3.16.1">The maximum allowable size for a network packet, including all headers.<a href="#section-2-3.16.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-3.17"><strong>Message:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-2-3.18">
+          <p id="section-2-3.18.1">The unit of communication that Homa provides to applications.
+A message consists of a fixed-length array of bytes ranging in length from a
+single byte up to a system-defined upper limit. There are two kinds
+of messages in Homa: requests and responses.<a href="#section-2-3.18.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-3.19"><strong>Packet:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-2-3.20">
+          <p id="section-2-3.20.1">The unit of transmission between Homa endpoints. Each packet has one
+of several types and consists of a type-specific header followed
+optionally by part or all of the data for a single message.<a href="#section-2-3.20.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-3.21"><strong>Priority:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-2-3.22">
+          <p id="section-2-3.22.1">A value in the range [0-7], which is included in transmitted packets
+and used by network switches to select a priority queue at the
+egress port for the packet.
+Switches should be configured to transmit higher-priority packets in
+preference to lower-priority ones.<a href="#section-2-3.22.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-3.23"><strong>Remote Procedure Call (RPC):</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-2-3.24">
+          <p id="section-2-3.24.1">The primary abstraction implemented by Homa, consisting of a request
+message sent from client to server, followed by a response message
+returned from the server back to the client.<a href="#section-2-3.24.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-3.25"><strong>Rpcid:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-2-3.26">
+          <p id="section-2-3.26.1">An integer that uniquely identifies a given RPC among all of the
+RPCs initiated from the same endpoint. The pair &lt;endpoint address, rpcid&gt;
+provides a system-wide unique identifier for a Homa RPC. Rpcids are
+always even and increase sequentially in order of creation on the
+client.<a href="#section-2-3.26.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-3.27"><strong>Scheduled Data:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-2-3.28">
+          <p id="section-2-3.28.1">Data that is transmitted in response to grant packets from the receiver.<a href="#section-2-3.28.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-3.29"><strong>Server:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-2-3.30">
+          <p id="section-2-3.30.1">An entity that receives a Homa request and sends the corresponding
+response. This term may refer to either an application program or the
+corresponding Homa endpoint.<a href="#section-2-3.30.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-3.31"><strong>SRPT (Shortest Remaining Processing Time):</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-2-3.32">
+          <p id="section-2-3.32.1">Homa tries to prioritize messages that have the fewest remaining
+bytes to transmit, both on the sender side and the receiver side.<a href="#section-2-3.32.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-3.33"><strong>TCP Segmentation Offload (TSO):</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-2-3.34">
+          <p id="section-2-3.34.1">A hardware feature implemented by most NICs, which allows host
+software to process outgoing network data in units larger than
+the network MTU. With TSO, the host generates <em>TSO frames</em>,
+which look like packets that exceed the MTU. The NIC divides
+each TSO frame into multiple smaller packets (<em>segments</em>) for
+transmission. In this document the term "packet" always refers
+to the entities transmitted on the wire, not TSO frames.<a href="#section-2-3.34.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-3.35"><strong>Top of Rack Switch (TOR):</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-2-3.36">
+          <p id="section-2-3.36.1">The network switches at the edges of the datacenter switching
+fabric. Individual hosts connect to TORs.<a href="#section-2-3.36.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-3.37"><strong>Unscheduled Data:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-2-3.38">
+          <p id="section-2-3.38.1">Data that is sent unilaterally, without requiring the permission of
+the receiver.<a href="#section-2-3.38.1" class="pilcrow">¶</a></p>
+</dd>
+      <dd class="break"></dd>
+</dl>
+</section>
+</div>
+<div id="packet-formats">
+<section id="section-3">
+      <h2 id="name-packet-formats">
+<a href="#section-3" class="section-number selfRef">3. </a><a href="#name-packet-formats" class="section-name selfRef">Packet Formats</a>
+      </h2>
+<p id="section-3-1">Homa endpoints communicate with packets that are transmitted using an
+unreliable datagram protocol such as IPv4 <span>[<a href="#RFC791" class="cite xref">RFC791</a>]</span> or IPv6 <span>[<a href="#RFC8200" class="cite xref">RFC8200</a>]</span>.
+Each packet has a <em>type</em> that determines how the packet is processed.
+A packet has two parts:<a href="#section-3-1" class="pilcrow">¶</a></p>
+<ul class="normal">
+<li class="normal" id="section-3-2.1">
+          <p id="section-3-2.1.1">A <em>common header</em>, which has the same format in all packets,
+regardless of type.<a href="#section-3-2.1.1" class="pilcrow">¶</a></p>
+</li>
+        <li class="normal" id="section-3-2.2">
+          <p id="section-3-2.2.1">Aditional information that is type-specific. Some packet types have
+no type-specific information.<a href="#section-3-2.2.1" class="pilcrow">¶</a></p>
+</li>
+      </ul>
+<p id="section-3-3">The structure of the common header is specified in <a href="#commonHdr" class="auto internal xref">Figure 1</a>;
+it closely mirrors the structure
+of TCP headers <span>[<a href="#RFC9293" class="cite xref">RFC9293</a>]</span> in order to allow Homa to take advantage
+of TCP Segmentation Offload (TSO) implemented by many NICs.<a href="#section-3-3" class="pilcrow">¶</a></p>
+<span id="name-common-header-format"></span><div id="commonHdr">
+<figure id="figure-1">
+        <div class="alignLeft art-text artwork" id="section-3-4.1">
+<pre>
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |          Source Port          |       Destination Port        |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                            Reserved                           |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                    Reserved                   |     Type      |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |  Doff | Rsvd |      Flags     |            Reserved           |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |           Checksum            |         Urgent Pointer        |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                             Rpcid (high)                      |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                             Rpcid (low)                     |S|
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+</pre>
+</div>
+<figcaption><a href="#figure-1" class="selfRef">Figure 1</a>:
+<a href="#name-common-header-format" class="selfRef">Common header format</a>
+        </figcaption></figure>
+</div>
+<p id="section-3-5">The fields in the common header are as follows:<a href="#section-3-5" class="pilcrow">¶</a></p>
+<span class="break"></span><dl class="dlParallel" id="section-3-6">
+        <dt id="section-3-6.1"><strong>Source Port:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-3-6.2">
+          <p id="section-3-6.2.1">Identifier that corresponds to an application-level entity on the
+the machine that sent the packet.<a href="#section-3-6.2.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-3-6.3"><strong>Destination Port:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-3-6.4">
+          <p id="section-3-6.4.1">Identifier that corresponds to an application-level entity on the
+the machine that receives the packet.<a href="#section-3-6.4.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-3-6.5"><strong>Type:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-3-6.6">
+          <p id="section-3-6.6.1">Type of this packet. Must have one of the following values:<a href="#section-3-6.6.1" class="pilcrow">¶</a></p>
+</dd>
+      <dd class="break"></dd>
+</dl>
+<div class="alignLeft art-text artwork" id="section-3-7">
+<pre>
+     DATA         16
+     GRANT        17
+     RESEND       18
+     RPC_UNKNOWN  19
+     BUSY         20
+     CUTOFFS      21
+     NEED_ACK     23
+     ACK          24
+     START_MSG    25
+</pre><a href="#section-3-7" class="pilcrow">¶</a>
+</div>
+<span class="break"></span><dl class="dlParallel" id="section-3-8">
+        <dt id="section-3-8.1"><strong>Doff:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-3-8.2">
+          <p id="section-3-8.2.1">Corresponds to the Data Offset field in TCP. Only used by senders
+in order to ensure correct TSO behavior; <span class="bcp14">MUST NOT</span> be used by Homa receivers.<a href="#section-3-8.2.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-3-8.3"><strong>Flags:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-3-8.4">
+          <p id="section-3-8.4.1">Corresponds to the Flags field in TCP.  Set by Homa during TCP hijacking
+to enable receviers to distinguish Homa-over-TCP packets from genuine TCP
+packets.<a href="#section-3-8.4.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-3-8.5"><strong>Checksum:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-3-8.6">
+          <p id="section-3-8.6.1">Corresponds to the Checksum field in TCP. Set by Homa during TCP hijacking.<a href="#section-3-8.6.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-3-8.7"><strong>Urgent Pointer:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-3-8.8">
+          <p id="section-3-8.8.1">Corresponds to the Urgent Pointer in TCP. Set by Homa during TCP
+hijacking to enable receviers to distinguish Homa-over-TCP packets
+from genuine TCP packets.<a href="#section-3-8.8.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-3-8.9"><strong>Rpcid:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-3-8.10">
+          <p id="section-3-8.10.1">Associates the packet with a particular RPC.<a href="#section-3-8.10.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-3-8.11"><strong>S:</strong></dt>
+        <dd style="margin-left: 1.5em" id="section-3-8.12">
+          <p id="section-3-8.12.1">If the low-order bit of the Rpcid is 0 it means that the packet was sent
+by the client for the RPC; 1 means it was sent by the server.<a href="#section-3-8.12.1" class="pilcrow">¶</a></p>
+</dd>
+      <dd class="break"></dd>
+</dl>
+<p id="section-3-9"><em>We are in the process of changing the protocol so that Homa packets
+are encapsulated in UDP packets with a reserved destination port number.
+Once that protocol change is complete, the format of the common header will
+shrink and simplify, since it will no longer need to match TCP headers.
+TCP hijacking will also be eliminated.</em><a href="#section-3-9" class="pilcrow">¶</a></p>
+<div id="secDataPkt">
+<section id="section-3.1">
+        <h3 id="name-data-packets">
+<a href="#section-3.1" class="section-number selfRef">3.1. </a><a href="#name-data-packets" class="section-name selfRef">DATA packets</a>
+        </h3>
+<p id="section-3.1-1">The structure of a Homa data packet is specified by <a href="#dataPkt" class="auto internal xref">Figure 2</a> below:<a href="#section-3.1-1" class="pilcrow">¶</a></p>
+<span id="name-format-of-data-packets"></span><div id="dataPkt">
+<figure id="figure-2">
+          <div class="alignLeft art-text artwork" id="section-3.1-2.1">
+<pre>
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                         Common Header                         |
+   |                               .                               |
+   |                               .                               |
+   |                               .                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                         Message Length                        |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                        Ack Rpcid (high)                       |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                        Ack Rpcid (low)                        |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |        Ack Server Port        |         Cutoff Version        |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |    Retrans    |                    Reserved                   |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                             Offset                            |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                         Message Data                          |
+   |                               .                               |
+   |                               .                               |
+   |                               .                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+</pre>
+</div>
+<figcaption><a href="#figure-2" class="selfRef">Figure 2</a>:
+<a href="#name-format-of-data-packets" class="selfRef">Format of DATA packets</a>
+          </figcaption></figure>
+</div>
+<p id="section-3.1-3">A data packet contains part or all of the payload for a message.
+It <span class="bcp14">MUST</span> start with a common header whose <code>Type</code> is <code>DATA</code> and whose <code>Rpcid</code>
+specifies the RPC that the data is associated with.
+If the <code>S</code> bit is set in the common header then this
+packet contains data for the response message of the RPC; otherwise it
+contains data for the request.
+The following fields follow the common header:<a href="#section-3.1-3" class="pilcrow">¶</a></p>
+<span class="break"></span><dl class="dlParallel" id="section-3.1-4">
+          <dt id="section-3.1-4.1"><strong>Message Length:</strong></dt>
+          <dd style="margin-left: 1.5em" id="section-3.1-4.2">
+            <p id="section-3.1-4.2.1">The total length of the message in bytes. This <span class="bcp14">MUST</span> be the same in
+every data packet for the message.<a href="#section-3.1-4.2.1" class="pilcrow">¶</a></p>
+</dd>
+          <dd class="break"></dd>
+<dt id="section-3.1-4.3"><strong>Ack Rpcid:</strong></dt>
+          <dd style="margin-left: 1.5em" id="section-3.1-4.4">
+            <p id="section-3.1-4.4.1">Identifies another RPC for which the sender is client and the receiver is
+server, whose response message has been fully received by the client.
+Indicates that the server can safely reclaim any state for that RPC.
+A value of 0 indicates that no RPC is being acknowledged.
+See <a href="#secAcks" class="auto internal xref">Section 7</a> below for details on acknowledgments.<a href="#section-3.1-4.4.1" class="pilcrow">¶</a></p>
+</dd>
+          <dd class="break"></dd>
+<dt id="section-3.1-4.5"><strong>Ack Server Port:</strong></dt>
+          <dd style="margin-left: 1.5em" id="section-3.1-4.6">
+            <p id="section-3.1-4.6.1">The port number (on the server) to which <code>Ack Rpcid</code> was sent.<a href="#section-3.1-4.6.1" class="pilcrow">¶</a></p>
+</dd>
+          <dd class="break"></dd>
+<dt id="section-3.1-4.7"><strong>Cutoff Version:</strong></dt>
+          <dd style="margin-left: 1.5em" id="section-3.1-4.8">
+            <p id="section-3.1-4.8.1">The version number for the priority cutoffs currently used
+on the sender for this receiver. See <a href="#secUnsched" class="auto internal xref">Section 5.2</a> below for details.<a href="#section-3.1-4.8.1" class="pilcrow">¶</a></p>
+</dd>
+          <dd class="break"></dd>
+<dt id="section-3.1-4.9"><strong>Retrans:</strong></dt>
+          <dd style="margin-left: 1.5em" id="section-3.1-4.10">
+            <p id="section-3.1-4.10.1">If this byte is nonzero it means the packet was sent in response
+to a <code>RESEND</code> packet.<a href="#section-3.1-4.10.1" class="pilcrow">¶</a></p>
+</dd>
+          <dd class="break"></dd>
+<dt id="section-3.1-4.11"><strong>Offset:</strong></dt>
+          <dd style="margin-left: 1.5em" id="section-3.1-4.12">
+            <p id="section-3.1-4.12.1">Offset within the message of the first byte of data contained in
+this packet.<a href="#section-3.1-4.12.1" class="pilcrow">¶</a></p>
+</dd>
+          <dd class="break"></dd>
+<dt id="section-3.1-4.13"><strong>Message Data:</strong></dt>
+          <dd style="margin-left: 1.5em" id="section-3.1-4.14">
+            <p id="section-3.1-4.14.1">Partial or complete contents of the message. The amount of data
+is determined by the length of the packet. This field is <span class="bcp14">OPTIONAL</span>.<a href="#section-3.1-4.14.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+</dl>
+<p id="section-3.1-5">In the simplest case, an RPC requires two <code>DATA</code> packets. The first one
+contains the entire request; it is transmitted from client to server and
+has an <code>S</code> bit of zero and a zero <code>Offset</code>. The second packet is transmitted
+from server to client; it has an <code>S</code> bit of one, and a zero <code>Offset</code>.<a href="#section-3.1-5" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="secStartMessagePkt">
+<section id="section-3.2">
+        <h3 id="name-start_msg-packets">
+<a href="#section-3.2" class="section-number selfRef">3.2. </a><a href="#name-start_msg-packets" class="section-name selfRef">START_MSG packets</a>
+        </h3>
+<p id="section-3.2-1"><code>START_MSG</code> packets are used by senders to initiate the transfer of
+scheduled messages; they notify the receiver that there is an inbound
+message available and that the receiver should issue grants for it.
+The structure of a <code>START_MSG</code> packet is specified by <a href="#startMessagePkt" class="auto internal xref">Figure 3</a>
+below:<a href="#section-3.2-1" class="pilcrow">¶</a></p>
+<span id="name-format-of-start_message-pac"></span><div id="startMessagePkt">
+<figure id="figure-3">
+          <div class="alignLeft art-text artwork" id="section-3.2-2.1">
+<pre>
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                         Common Header                         |
+   |                               .                               |
+   |                               .                               |
+   |                               .                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                         Message Length                        |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+</pre>
+</div>
+<figcaption><a href="#figure-3" class="selfRef">Figure 3</a>:
+<a href="#name-format-of-start_message-pac" class="selfRef">Format of START_MESSAGE packets</a>
+          </figcaption></figure>
+</div>
+<p id="section-3.2-3">A <code>START_MSG</code> packet contains a common header followed by the following field:<a href="#section-3.2-3" class="pilcrow">¶</a></p>
+<span class="break"></span><dl class="dlParallel" id="section-3.2-4">
+          <dt id="section-3.2-4.1"><strong>Message Length:</strong></dt>
+          <dd style="margin-left: 1.5em" id="section-3.2-4.2">
+            <p id="section-3.2-4.2.1">The total length of the message, in bytes.<a href="#section-3.2-4.2.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+</dl>
+</section>
+</div>
+<div id="secGrantPkt">
+<section id="section-3.3">
+        <h3 id="name-grant-packets">
+<a href="#section-3.3" class="section-number selfRef">3.3. </a><a href="#name-grant-packets" class="section-name selfRef">GRANT packets</a>
+        </h3>
+<p id="section-3.3-1"><code>GRANT</code> packets are used to manage network queue lengths when multiple
+senders attempt to send messages to the same destination. The structure of
+a grant packet is specified by <a href="#grantPkt" class="auto internal xref">Figure 4</a> below:<a href="#section-3.3-1" class="pilcrow">¶</a></p>
+<span id="name-format-of-grant-packets"></span><div id="grantPkt">
+<figure id="figure-4">
+          <div class="alignLeft art-text artwork" id="section-3.3-2.1">
+<pre>
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                         Common Header                         |
+   |                               .                               |
+   |                               .                               |
+   |                               .                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                             Offset                            |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |    Priority   |
+   +-+-+-+-+-+-+-+-+
+</pre>
+</div>
+<figcaption><a href="#figure-4" class="selfRef">Figure 4</a>:
+<a href="#name-format-of-grant-packets" class="selfRef">Format of GRANT packets</a>
+          </figcaption></figure>
+</div>
+<p id="section-3.3-3">A <code>GRANT</code> packet contains a common header followed by the following fields:<a href="#section-3.3-3" class="pilcrow">¶</a></p>
+<span class="break"></span><dl class="dlParallel" id="section-3.3-4">
+          <dt id="section-3.3-4.1"><strong>Offset:</strong></dt>
+          <dd style="margin-left: 1.5em" id="section-3.3-4.2">
+            <p id="section-3.3-4.2.1">The recipient of the <code>GRANT</code> packet is now entitled to transmit all of the
+data in the message given by the <code>Rpcid</code> common header field up to (but not
+including) this offset.<a href="#section-3.3-4.2.1" class="pilcrow">¶</a></p>
+</dd>
+          <dd class="break"></dd>
+<dt id="section-3.3-4.3"><strong>Priority:</strong></dt>
+          <dd style="margin-left: 1.5em" id="section-3.3-4.4">
+            <p id="section-3.3-4.4.1">The recipient should use the value of this field as the priority in all
+future <code>DATA</code> packets transmitted for this message.<a href="#section-3.3-4.4.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+</dl>
+</section>
+</div>
+<div id="secResendPkt">
+<section id="section-3.4">
+        <h3 id="name-resend-packets">
+<a href="#section-3.4" class="section-number selfRef">3.4. </a><a href="#name-resend-packets" class="section-name selfRef">RESEND packets</a>
+        </h3>
+<p id="section-3.4-1">A Homa endpoint sends <code>RESEND</code> packets when message data that it is expecting
+to receive is overdue and possibly lost. The structure of a <code>RESEND</code> packet is
+specified by <a href="#resendPkt" class="auto internal xref">Figure 5</a> below:<a href="#section-3.4-1" class="pilcrow">¶</a></p>
+<span id="name-format-of-resend-packets"></span><div id="resendPkt">
+<figure id="figure-5">
+          <div class="alignLeft art-text artwork" id="section-3.4-2.1">
+<pre>
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                         Common Header                         |
+   |                               .                               |
+   |                               .                               |
+   |                               .                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                             Offset                            |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                             Length                            |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |    Priority   |
+   +-+-+-+-+-+-+-+-+
+</pre>
+</div>
+<figcaption><a href="#figure-5" class="selfRef">Figure 5</a>:
+<a href="#name-format-of-resend-packets" class="selfRef">Format of RESEND packets</a>
+          </figcaption></figure>
+</div>
+<p id="section-3.4-3">A <code>RESEND</code> packet contains a common header followed by the following fields:<a href="#section-3.4-3" class="pilcrow">¶</a></p>
+<span class="break"></span><dl class="dlParallel" id="section-3.4-4">
+          <dt id="section-3.4-4.1"><strong>Offset:</strong></dt>
+          <dd style="margin-left: 1.5em" id="section-3.4-4.2">
+            <p id="section-3.4-4.2.1">The offset within the message of the first byte of data to retransmit.<a href="#section-3.4-4.2.1" class="pilcrow">¶</a></p>
+</dd>
+          <dd class="break"></dd>
+<dt id="section-3.4-4.3"><strong>Length:</strong></dt>
+          <dd style="margin-left: 1.5em" id="section-3.4-4.4">
+            <p id="section-3.4-4.4.1">The number of bytes to retransmit. -1 means that the sender has not
+received any data for the message, so the receiver should retransmit
+all data that it has previously transmitted.<a href="#section-3.4-4.4.1" class="pilcrow">¶</a></p>
+</dd>
+          <dd class="break"></dd>
+<dt id="section-3.4-4.5"><strong>Priority:</strong></dt>
+          <dd style="margin-left: 1.5em" id="section-3.4-4.6">
+            <p id="section-3.4-4.6.1">The priority to use for all packets retransmitted in response to
+this request.<a href="#section-3.4-4.6.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+</dl>
+</section>
+</div>
+<div id="secUnknownPkt">
+<section id="section-3.5">
+        <h3 id="name-rpc_unknown-packets">
+<a href="#section-3.5" class="section-number selfRef">3.5. </a><a href="#name-rpc_unknown-packets" class="section-name selfRef">RPC_UNKNOWN packets</a>
+        </h3>
+<p id="section-3.5-1">A Homa endpoint sends a packet with type <code>RPC_UNKNOWN</code> when it receives a
+<code>RESEND</code> packet with an Rpcid that is unknown to it (i.e. the endpoint
+has no outbound message for that Rpcid). An <code>RPC_UNKNOWN</code> packet consists of
+a common header with no additional information.<a href="#section-3.5-1" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="secBusyPkt">
+<section id="section-3.6">
+        <h3 id="name-busy-packets">
+<a href="#section-3.6" class="section-number selfRef">3.6. </a><a href="#name-busy-packets" class="section-name selfRef">BUSY packets</a>
+        </h3>
+<p id="section-3.6-1">Packets with type <code>BUSY</code> are sent by an endpoint when it is unable or
+unwilling to perform an action expected by the receiving endpoint.  A <code>BUSY</code>
+packet indicates that the sending endpoint is alive and well and will
+eventually get around to the expected action, so the receiver
+should not time out the RPC. There are currently three situations where
+<code>BUSY</code> packets are issued:<a href="#section-3.6-1" class="pilcrow">¶</a></p>
+<ul class="normal">
+<li class="normal" id="section-3.6-2.1">
+            <p id="section-3.6-2.1.1">When the server for an RPC receives a <code>RESEND</code> request for the response
+message, but the response message is not yet available.<a href="#section-3.6-2.1.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-3.6-2.2">
+            <p id="section-3.6-2.2.1">When an endpoint receives a <code>RESEND</code> request for message data that is
+available, but it has chosen not to transmit the data because of its
+SRPT policy.<a href="#section-3.6-2.2.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-3.6-2.3">
+            <p id="section-3.6-2.3.1">When a server receives a duplicate <code>START_MSG</code> request for an RPC.
+A client sends a duplicate <code>START_MSG</code> if it fails to receive any grants
+for a new message within a reasonable time frame (in case the <code>START_MSG</code>
+was lost). The server may not have sent grants yet because of its
+SRPT policy.<a href="#section-3.6-2.3.1" class="pilcrow">¶</a></p>
+</li>
+        </ul>
+<p id="section-3.6-3">A <code>BUSY</code> packet consists entirely of the common header.<a href="#section-3.6-3" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="secCutoffsPkt">
+<section id="section-3.7">
+        <h3 id="name-cutoffs-packets">
+<a href="#section-3.7" class="section-number selfRef">3.7. </a><a href="#name-cutoffs-packets" class="section-name selfRef">CUTOFFS packets</a>
+        </h3>
+<p id="section-3.7-1">Packets with type <code>CUTOFFS</code> specify how the recipient should
+assign priorities for unscheduled messages in the future
+(see <a href="#secUnsched" class="auto internal xref">Section 5.2</a> for details). The structure of
+a <code>CUTOFFS</code> packet is specified by <a href="#cutoffsPkt" class="auto internal xref">Figure 6</a> below:<a href="#section-3.7-1" class="pilcrow">¶</a></p>
+<span id="name-format-of-cutoffs-packets"></span><div id="cutoffsPkt">
+<figure id="figure-6">
+          <div class="alignLeft art-text artwork" id="section-3.7-2.1">
+<pre>
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                         Common Header                         |
+   |                               .                               |
+   |                               .                               |
+   |                               .                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                           Cutoffs[0]                          |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                           Cutoffs[1]                          |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                              ...                              |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                           Cutoffs[7]                          |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |         Cutoff Version        |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+</pre>
+</div>
+<figcaption><a href="#figure-6" class="selfRef">Figure 6</a>:
+<a href="#name-format-of-cutoffs-packets" class="selfRef">Format of CUTOFFS packets</a>
+          </figcaption></figure>
+</div>
+<p id="section-3.7-3">A <code>CUTOFFS</code> packet contains a common header followed by the following fields:<a href="#section-3.7-3" class="pilcrow">¶</a></p>
+<span class="break"></span><dl class="dlParallel" id="section-3.7-4">
+          <dt id="section-3.7-4.1"><strong>Cutoffs:</strong></dt>
+          <dd style="margin-left: 1.5em" id="section-3.7-4.2">
+            <p id="section-3.7-4.2.1">An array of 8 monotonically nonincreasing 32-bit values. The priority for an
+unscheduled <code>DATA</code> packet sent from the <code>CUTOFFS</code> recipient to its sender
+<span class="bcp14">MUST</span> be the largest <code>i</code> such that <code>Cutoffs[i]</code> is greater than or
+equal to the length
+of the packet's message. Entry 0 in <code>Cutoffs</code> must be greater than or
+equal to the largest allowable message length.<a href="#section-3.7-4.2.1" class="pilcrow">¶</a></p>
+</dd>
+          <dd class="break"></dd>
+<dt id="section-3.7-4.3"><strong>Cutoff Version:</strong></dt>
+          <dd style="margin-left: 1.5em" id="section-3.7-4.4">
+            <p id="section-3.7-4.4.1">Identfies this particular choice of cutoffs; the <code>CUTOFFS</code> recipient
+<span class="bcp14">MUST</span> include this value as the <code>Cutoff Version</code> in all
+future <code>DATA</code> packets sent to the <code>CUTOFFS</code> sender (this allows the sender to
+detect when cutoffs need to be updated).<a href="#section-3.7-4.4.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+</dl>
+</section>
+</div>
+<div id="secNeedAckPkt">
+<section id="section-3.8">
+        <h3 id="name-need_ack-packets">
+<a href="#section-3.8" class="section-number selfRef">3.8. </a><a href="#name-need_ack-packets" class="section-name selfRef">NEED_ACK packets</a>
+        </h3>
+<p id="section-3.8-1">A <code>NEED_ACK</code> packet is sent from the server for an RPC to the client.
+It indicates that the server has transmitted all of the data in the
+response message for an RPC and would like to reclaim its state for
+that RPC. However, it cannot do so until the client has acknowledged
+receiving the entire response. If the client is no longer waiting for
+the indicated <code>Rpcid</code> (or if the <code>Rpcid</code> is unknown), it <span class="bcp14">MUST</span> respond with
+an <code>ACK</code> packet that includes the <code>Rpcid</code>. If the client has not yet
+received the full response, it need not respond to the <code>NEED_ACK</code> packet
+(but it <span class="bcp14">SHOULD</span> issue a <code>RESEND</code> for any unreceived bytes).<a href="#section-3.8-1" class="pilcrow">¶</a></p>
+<p id="section-3.8-2">The structure of a <code>NEED_ACK</code> packet consists of a common header with
+no additional information.<a href="#section-3.8-2" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="secAckPkt">
+<section id="section-3.9">
+        <h3 id="name-ack-packets">
+<a href="#section-3.9" class="section-number selfRef">3.9. </a><a href="#name-ack-packets" class="section-name selfRef">ACK packets</a>
+        </h3>
+<p id="section-3.9-1">An <code>ACK</code> packet is sent from a client to a server.  It acknowledges that
+the server can safely reclaim state for one or more RPCs.
+The structure of an <code>ACK</code> packet is specified by <a href="#ackPkt" class="auto internal xref">Figure 7</a> below:<a href="#section-3.9-1" class="pilcrow">¶</a></p>
+<span id="name-format-of-ack-packets"></span><div id="ackPkt">
+<figure id="figure-7">
+          <div class="alignLeft art-text artwork" id="section-3.9-2.1">
+<pre>
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                         Common Header                         |
+   |                               .                               |
+   |                               .                               |
+   |                               .                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |            Num_Acks           |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                           Ack Rpcid (high)                    |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                           Ack Rpcid (low)                     |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |          Server Port          |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                             Rpcid (high)                      |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                             Rpcid (low)                       |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |          Server Port          |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   . . .
+</pre>
+</div>
+<figcaption><a href="#figure-7" class="selfRef">Figure 7</a>:
+<a href="#name-format-of-ack-packets" class="selfRef">Format of ACK packets</a>
+          </figcaption></figure>
+</div>
+<p id="section-3.9-3">An <code>ACK</code> packet can acknowledge multiple RPCs. First, it acknowledges the
+RPC identified by the <code>Rpcid</code> and <code>Server Port</code> fields of the common header.
+It also acknowleldges additional RPCs specified with information following
+the common header:<a href="#section-3.9-3" class="pilcrow">¶</a></p>
+<span class="break"></span><dl class="dlParallel" id="section-3.9-4">
+          <dt id="section-3.9-4.1"><strong>Num_Acks:</strong></dt>
+          <dd style="margin-left: 1.5em" id="section-3.9-4.2">
+            <p id="section-3.9-4.2.1">Indicates how many additional acknowledgments follow after this field.<a href="#section-3.9-4.2.1" class="pilcrow">¶</a></p>
+</dd>
+          <dd class="break"></dd>
+<dt id="section-3.9-4.3"><strong>Ack Rpcid:</strong></dt>
+          <dd style="margin-left: 1.5em" id="section-3.9-4.4">
+            <p id="section-3.9-4.4.1">Identifies an RPC with the following properties:<a href="#section-3.9-4.4.1" class="pilcrow">¶</a></p>
+<ul class="normal">
+<li class="normal" id="section-3.9-4.4.2.1">
+                <p id="section-3.9-4.4.2.1.1">The source of the <code>ACK</code> packet was the client for the RPC and the
+  target of the <code>ACK</code> packet was its server.<a href="#section-3.9-4.4.2.1.1" class="pilcrow">¶</a></p>
+</li>
+              <li class="normal" id="section-3.9-4.4.2.2">
+                <p id="section-3.9-4.4.2.2.1">The RPC's response message has been fully received by the client.<a href="#section-3.9-4.4.2.2.1" class="pilcrow">¶</a></p>
+</li>
+              <li class="normal" id="section-3.9-4.4.2.3">
+                <p id="section-3.9-4.4.2.3.1">Or, the <code>Ack Rpcid</code> was received in a <code>NEED_ACK</code> message but was unknown
+  to the client.<a href="#section-3.9-4.4.2.3.1" class="pilcrow">¶</a></p>
+</li>
+            </ul>
+</dd>
+          <dd class="break"></dd>
+<dt id="section-3.9-4.5"><strong>Ack Server Port:</strong></dt>
+          <dd style="margin-left: 1.5em" id="section-3.9-4.6">
+            <p id="section-3.9-4.6.1">The server port associated with <code>Ack Rpcid</code>.<a href="#section-3.9-4.6.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+</dl>
+<p id="section-3.9-5"><em>It does not appear that Acks need to include a `Server Port. This field
+should probably be eliminated.</em><a href="#section-3.9-5" class="pilcrow">¶</a></p>
+</section>
+</div>
+</section>
+</div>
+<div id="secGrants">
+<section id="section-4">
+      <h2 id="name-policy-considerations-for-g">
+<a href="#section-4" class="section-number selfRef">4. </a><a href="#name-policy-considerations-for-g" class="section-name selfRef">Policy Considerations for Grants</a>
+      </h2>
+<p id="section-4-1">The policy for issuing grants (which messages to grant at any given time and
+how much to grant to each message) involves complex considerations and has
+a significant impact on message latency and throughput, network link
+utilization, buffer occupancy in network switches, and packet drops.<a href="#section-4-1" class="pilcrow">¶</a></p>
+<p id="section-4-2">The basic lifecycle of a scheduled message is as follows:<a href="#section-4-2" class="pilcrow">¶</a></p>
+<ul class="normal">
+<li class="normal" id="section-4-3.1">
+          <p id="section-4-3.1.1">The message sender transmits a <code>START_MSG</code> packet to inform the receiver
+of the message. The packet also includes the message's length.<a href="#section-4-3.1.1" class="pilcrow">¶</a></p>
+</li>
+        <li class="normal" id="section-4-3.2">
+          <p id="section-4-3.2.1">Once the <code>START_MSG</code> packet has been received, the receiver begins
+issuing grants for the bytes of the message.<a href="#section-4-3.2.1" class="pilcrow">¶</a></p>
+</li>
+        <li class="normal" id="section-4-3.3">
+          <p id="section-4-3.3.1">As grants arrive at the sender, it transmits data packets. As
+these packets are received, the receiver issues additional grants, until
+eventually the entire message has been transmitted.<a href="#section-4-3.3.1" class="pilcrow">¶</a></p>
+</li>
+      </ul>
+<div id="achieving-high-throughput">
+<section id="section-4.1">
+        <h3 id="name-achieving-high-throughput">
+<a href="#section-4.1" class="section-number selfRef">4.1. </a><a href="#name-achieving-high-throughput" class="section-name selfRef">Achieving high throughput</a>
+        </h3>
+<p id="section-4.1-1">At any given time there is a range of bytes in a message that have been
+granted but not yet been received. The number of bytes in this range is
+referred to as the <em>incoming</em> for the message. A byte is considered to
+have been granted once the <code>GRANT</code> packet has been transmitted by the
+receiver,  even if the grant has not yet been received by the sender and/or
+the packet containing the byte has not been transmitted by the sender.<a href="#section-4.1-1" class="pilcrow">¶</a></p>
+<p id="section-4.1-2">Incoming data also includes unscheduled messages. If a message is
+unscheduled, any of its bytes not yet received at the receiver
+are treated as "incoming".<a href="#section-4.1-2" class="pilcrow">¶</a></p>
+<p id="section-4.1-3">The term <em>total incoming</em> refers to the sum of the incomings of all messages
+known to an endpoint.<a href="#section-4.1-3" class="pilcrow">¶</a></p>
+<p id="section-4.1-4">In order for a message to achieve the full throughput of the network, its
+incoming must always be at least as large as the bandwidth-delay product (BDP)
+for a packet roundtrip. The relevant bandwidth for BDP
+is that of the network links connecting hosts and top-of-rack switches
+(TORs); this discussion assumes for simplicity that all host-TOR uplinks
+have the same bandwidth. The delay for BDP must include all software
+overheads in addition to delays in the network hardware.
+For example, delay can be measured on the sender as the time
+from when the first <code>DATA</code> packet for a message is passed to the NIC until
+the packet
+has been received and processed by software on the receiver, a <code>GRANT</code>
+packet is issued by the receiver, the <code>GRANT</code> is received and processed
+by software on the sender, and a subsequent <code>DATA</code> packet has been
+passed to the NIC. On the receiver, delay can be measured as the time
+from when Homa software receives a <code>DATA</code> packet until a new <code>GRANT</code>
+has been transmitted, the <code>GRANT</code> has been received and processed by
+software on the sender, a <code>DATA</code> packet  authorized by the <code>GRANT</code>
+has been transmitted, and that packet has been received by Homa software
+on the receiver.<a href="#section-4.1-4" class="pilcrow">¶</a></p>
+<p id="section-4.1-5">The round-trip time for BDP is dominated by software overheads.  For example,
+the network hardware contribution to round-trip time can be as low as 5 μs,
+but the total round-trip time including software is likely to be at least
+15-20 μs in the best case on unloaded servers <span>[<a href="#HomaLinux" class="cite xref">HomaLinux</a>]</span>. Software overheads
+are affected significantly by server load (e.g., hot spots can cause large
+delays in servicing incoming packets). On servers
+with moderate loads, median round-trip times are likely to be at least
+30-50 μs, with 99th-percentile times of 100-300 μs <span>[<a href="#HomaLinux" class="cite xref">HomaLinux</a>]</span>.
+If we assume a round-trip time of 100 μs in order to ensure consistently
+high throughput under load, with a link speed of 100 Gbps, then the
+incoming for a message must be at least 1.25 Mbytes. As discussed below,
+buffer occupancy considerations may make this amount impractical.<a href="#section-4.1-5" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="srpt-and-overcommitment">
+<section id="section-4.2">
+        <h3 id="name-srpt-and-overcommitment">
+<a href="#section-4.2" class="section-number selfRef">4.2. </a><a href="#name-srpt-and-overcommitment" class="section-name selfRef">SRPT and Overcommitment</a>
+        </h3>
+<p id="section-4.2-1">Grants play an important role in implementing SRPT. If a receiver has
+multiple inbound messages, it <span class="bcp14">MUST</span> use grants to prioritize messages
+with the fewest remaining bytes to transmit.<a href="#section-4.2-1" class="pilcrow">¶</a></p>
+<p id="section-4.2-2">One simple approach is to issue grants only to the single highest priority
+message, allowing that message to consume the entire downlink bandwidth. Then,
+once the highest priority message is completely granted, the receiver can
+issue grants to the next higher priority message, and so on. If a new
+message begins arriving and has fewer remaining bytes than the current
+highest priority message, then the receiver stops granting to the previous
+message and begins granting to the new message.<a href="#section-4.2-2" class="pilcrow">¶</a></p>
+<p id="section-4.2-3">Unfortunately a one-message-at-a-time approach will result in wasted
+link bandwidth. The problem is that a sender may also have multiple
+outbound messages. If it has grants for more than one of them, then it
+will dedicate its uplink bandwidth to the highest priority message.
+Thus, when a receiver issues a grant it cannot be certain that the
+sender will transmit the granted bytes immediately. If a receiver
+only grants to one message and that message's sender chooses not to
+transmit the message, then there will be a "bubble" on
+the receiver's downlink where its bandwidth is not utilized, even
+though there might be other inbound messages that could use the bandwidth.
+Measurements in <span>[<a href="#Homa" class="cite xref">Homa</a>]</span> indicate that a one-message-at-a-time approach
+wastes about 40% of the link bandwidth in mixed workloads.<a href="#section-4.2-3" class="pilcrow">¶</a></p>
+<p id="section-4.2-4">In order to maximize link bandwidth utilization, receivers <span class="bcp14">SHOULD</span>
+          <em>overcommit</em> their downlinks; that is, they should maintain outstanding
+grants for more than one message at a time. With this approach, even if
+some senders choose not to transmit, other senders can use the available
+link bandwidth. A degree of overcommitment of 4-8 seems adequate in practice.<a href="#section-4.2-4" class="pilcrow">¶</a></p>
+<p id="section-4.2-5">Overcommitment has two potential negative consequences. The first is that
+it potentially weakens SRPT: if the highest-priority sender is willing to
+transmit, there may be packets from lower-priority messages that compete
+for the downlink bandwidth, thereby reducing the throughput for the
+high-priority message. This problem is solved by using priorities, as
+discussed in <a href="#secPriorities" class="auto internal xref">Section 5</a>.<a href="#section-4.2-5" class="pilcrow">¶</a></p>
+<p id="section-4.2-6">The second problem with overcommitment is that it increases buffer
+occupancy in the network switch. If a receiver grants to multiple inbound
+messages and all of their senders transmit, the aggregate bandwidth of
+transmission will exceed the bandwidth of the receiver's downlink, so
+packets will be buffered at the egress port in the TOR. The amount of
+buffer space occupied will equal the total incoming across all of the
+receiver's inbound messages, less one BDP. Thus, the
+more messages a receiver grants to, the more buffer space will be
+consumed in the TOR (assuming total incoming increases with the degree
+of overcommitment). Buffer management is discussed in <a href="#secBuffers" class="auto internal xref">Section 9</a>.<a href="#section-4.2-6" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="one-message-per-endpoint">
+<section id="section-4.3">
+        <h3 id="name-one-message-per-endpoint">
+<a href="#section-4.3" class="section-number selfRef">4.3. </a><a href="#name-one-message-per-endpoint" class="section-name selfRef">One message per endpoint</a>
+        </h3>
+<p id="section-4.3-1">Under normal conditions, a Homa endpoint <span class="bcp14">SHOULD</span> only issue grants to a
+single message from a given endpoint. If a receiver grants to multiple
+messages from the same endpoint, the sender will only transmit the higher
+priority of the two messages; if the sender has some other message to a
+different destination that is even higher priority, then it will not
+transmit either of the two lower-priority messages. Thus there is no
+point in granting to a second message from the same endpoint; better to
+use that grant for a message from a different endpoint, even if it is
+lower priority.<a href="#section-4.3-1" class="pilcrow">¶</a></p>
+<p id="section-4.3-2">However, as network speeds increase it may make sense for a receiver
+to grant to multiple messages from the same endpoint. This is because
+it is becoming increasingly difficult for a single message to consume
+all of the outbound bandwidth of a network link. For example, the
+bandwidth for copying data from user space into nework packets
+has been measured at 30-40 Gbps on some machines; this is inadequate
+to support a 100 Gbps link. When this occurs, it may make sense to
+grant to multiple messages from the same endpoint in order to ensure
+full usage of the sender's uplink.<a href="#section-4.3-2" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="fifo-grants">
+<section id="section-4.4">
+        <h3 id="name-fifo-grants">
+<a href="#section-4.4" class="section-number selfRef">4.4. </a><a href="#name-fifo-grants" class="section-name selfRef">FIFO grants</a>
+        </h3>
+<p id="section-4.4-1">The SRPT policy has been shown to result in low latencies across almost
+all message lengths <span>[<a href="#Homa" class="cite xref">Homa</a>]</span> <span>[<a href="#HomaLinux" class="cite xref">HomaLinux</a>]</span>. Although the latency benefits are
+greatest for short messages, Homa also reduces latencies for
+long messages when compared to the "fair sharing" approach used in TCP.
+This is because SRPT results in "run to completion" behavior. Once a
+message becomes highest priority, it will remain highest priority until
+it completes (unless a new message with higher priority arrives) so it
+will finish quickly.  In contrast, fair sharing will split the available
+network bandwidth across all of the inbound messages, so all of the
+inbound messages finish slowly. This is similar to a phenomenon
+observed in process scheduling: when there are many CPU-bound processes,
+FIFO scheduling results in lower average completion time than round-robin.<a href="#section-4.4-1" class="pilcrow">¶</a></p>
+<p id="section-4.4-2">In principle it is possible that SRPT could result in starvation for the
+longest inbound message, if there are enough shorter messages to fully
+utilize the link bandwidth. This is unlikely to occur in practice, though,
+since network links are rarely driven at 100% capacity; lab experiments
+have found it difficult to generate starvation even with adversarial
+workloads.<a href="#section-4.4-2" class="pilcrow">¶</a></p>
+<p id="section-4.4-3">To eliminate any possibility of starvation, a receiver <span class="bcp14">MAY</span> reserve a
+small fraction of its link bandwidth for grants to the oldest inbound
+message rather than the highest priority one.  A FIFO fraction of about
+5% seems adequate to eliminate starvation even under pathological
+conditions.<a href="#section-4.4-3" class="pilcrow">¶</a></p>
+</section>
+</div>
+</section>
+</div>
+<div id="secPriorities">
+<section id="section-5">
+      <h2 id="name-priorities-and-cutoffs">
+<a href="#section-5" class="section-number selfRef">5. </a><a href="#name-priorities-and-cutoffs" class="section-name selfRef">Priorities and Cutoffs</a>
+      </h2>
+<p id="section-5-1">Homa uses the priority queues in modern data center switches to implement
+SRPT. A sender can specify a priority in each outbound packet (for example,
+using the high-order bits of the DSCP field in IPv4 or the high-order bits
+of the Traffic Class field in IPv6).
+Network switches can be configured to use the priority value in a packet
+to place the packet in one of several queues at the switch egress port.
+Switches can also be configured to serve the egress queues in strict
+priority order, so that higher-priority packets are transmitted before
+lower-priority packets. This section describes how Homa uses packet
+priorities.<a href="#section-5-1" class="pilcrow">¶</a></p>
+<div id="scheduled-packets">
+<section id="section-5.1">
+        <h3 id="name-scheduled-packets">
+<a href="#section-5.1" class="section-number selfRef">5.1. </a><a href="#name-scheduled-packets" class="section-name selfRef">Scheduled packets</a>
+        </h3>
+<p id="section-5.1-1">Each <code>GRANT</code> packet contains a Priority field, which the sender <span class="bcp14">MUST</span> use
+for all subsequent packets in the associated message until the next
+<code>GRANT</code> is received. The receiver thus
+has direct control over the priority for each scheduled packet. When a
+receiver grants to multiple inbound messages at once, it <span class="bcp14">SHOULD</span> assign
+a different priority for each message (highest priority for the message
+with the fewest remaining bytes to transmit). This ensures that when
+multiple senders transmit simultaneously and the receiver's TOR link
+is overcommitted, packets from the highest priority message will be
+transmitted and packets for other messages will be queued in the TOR.
+If the highest-priority sender chooses not to transmit its message,
+then packets from other messages will get through to the receiver.
+The use of priorities allows Homa to achieve "perfect" SRPT even when
+overcommitting its TOR link.<a href="#section-5.1-1" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="secUnsched">
+<section id="section-5.2">
+        <h3 id="name-unscheduled-packets">
+<a href="#section-5.2" class="section-number selfRef">5.2. </a><a href="#name-unscheduled-packets" class="section-name selfRef">Unscheduled packets</a>
+        </h3>
+<p id="section-5.2-1">For unscheduled packets the receiver must assign packet priorities in
+advance. It does this by analyzing recent incoming traffic and
+assigning unscheduled priorities based on message length (shorter messages
+receive higher priorities). A collection of "cutoffs" identifies the
+message lengths that separate different priority
+levels. Each receiver communicates its cutoffs to senders using <code>CUTOFF</code>
+packets. Senders retain information about the cutoffs for each
+endpoint that they communicate with, and use that information to choose
+priorities for unscheduled packets.<a href="#section-5.2-1" class="pilcrow">¶</a></p>
+<p id="section-5.2-2">A version number is associated with the cutoff information for each
+endpoint. A receiver <span class="bcp14">SHOULD</span> occasionally update its cutoffs to reflect
+changes in traffic patterns and when it does so it <span class="bcp14">MUST</span> assign a new
+version number for the new cutoffs.  The version number is included in
+<code>CUTOFFS</code> packets, saved on senders, and included in <code>DATA</code>
+packets from the sender to the corresponding receiver. Each time a
+data packet is received, the receiver <span class="bcp14">MUST</span> check the Cutoff
+Version in the packet; if it is out of date, the receiver <span class="bcp14">MUST</span>
+send a new <code>CUTOFFS</code> packet to update the sender.<a href="#section-5.2-2" class="pilcrow">¶</a></p>
+<p id="section-5.2-3">Homa endpoints <span class="bcp14">SHOULD</span> assign unscheduled priorities so that each
+priority level is used for about the same number of incoming bytes.
+First, an endpoint can use recent traffic statistics to compute the
+total fraction of incoming bytes that are unscheduled. The available
+priority levels <span class="bcp14">SHOULD</span> be divided between unscheduled packets and
+scheduled packets using this fraction; e.g., if 75% of incoming bytes
+are unscheduled, then 75% of available priority levels <span class="bcp14">SHOULD</span> be used
+for unscheduled packets and 25% of available priority levels <span class="bcp14">SHOULD</span> be
+used for scheduled packets. The highest priority levels <span class="bcp14">MUST</span> be
+assigned to unscheduled packets. At least one priority level <span class="bcp14">MUST</span> be
+available for each of unscheduled and scheduled packets, but the
+lowest unscheduled priority level <span class="bcp14">MAY</span> also be used as the highest
+scheduled priority level.<a href="#section-5.2-3" class="pilcrow">¶</a></p>
+<p id="section-5.2-4">Once the number of unscheduled priority levels is known, the cutoffs
+between unscheduled priorities <span class="bcp14">SHOULD</span> be chosen so that each priority
+level is used for the same amount of traffic (based on recent traffic
+patterns). Higher priority levels go to shorter messages.<a href="#section-5.2-4" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="how-many-priority-levels">
+<section id="section-5.3">
+        <h3 id="name-how-many-priority-levels">
+<a href="#section-5.3" class="section-number selfRef">5.3. </a><a href="#name-how-many-priority-levels" class="section-name selfRef">How many priority levels?</a>
+        </h3>
+<p id="section-5.3-1">Measurements suggest that 4 priority levels is enough to produce
+good performance and additional priority levels beyond 4
+provide little benefit <span>[<a href="#HomaLinux" class="cite xref">HomaLinux</a>]</span>. Homa can operate with a single
+priority level and still provide better latency than
+TCP, though additional priority levels provide significant latency
+improvements.<a href="#section-5.3-1" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="priorities-and-overcommitment">
+<section id="section-5.4">
+        <h3 id="name-priorities-and-overcommitme">
+<a href="#section-5.4" class="section-number selfRef">5.4. </a><a href="#name-priorities-and-overcommitme" class="section-name selfRef">Priorities and overcommitment</a>
+        </h3>
+<p id="section-5.4-1">The number of priority levels assigned for scheduled packets need
+not be the same as the degree of overcommitment. Suppose that an
+endpoint is currently granting to M inbound messages and there
+are S scheduled
+priority levels. If M &gt; S, then the S-1 highest priority messages
+<span class="bcp14">SHOULD</span> each use a dedicated priority level and the M-(S-1) lowest
+priority messages <span class="bcp14">SHOULD</span> share the lowest scheduled priority level.
+If M &lt; S, then the M lowest scheduled priorities <span class="bcp14">SHOULD</span> be used for
+grants (reserving the highest priority levels allows faster
+preemption if new higher-priority messages arrive).<a href="#section-5.4-1" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="control-packets">
+<section id="section-5.5">
+        <h3 id="name-control-packets">
+<a href="#section-5.5" class="section-number selfRef">5.5. </a><a href="#name-control-packets" class="section-name selfRef">Control packets</a>
+        </h3>
+<p id="section-5.5-1">All packets other than <code>DATA</code> packets <span class="bcp14">SHOULD</span> use the highest available
+priority level in order to minimize the delays experienced by these
+packets. It is particularly important for <code>GRANT</code> packets to have high
+priority in order to minimize control lag and maximize throughput.<a href="#section-5.5-1" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="priorities-and-the-switching-fabric">
+<section id="section-5.6">
+        <h3 id="name-priorities-and-the-switchin">
+<a href="#section-5.6" class="section-number selfRef">5.6. </a><a href="#name-priorities-and-the-switchin" class="section-name selfRef">Priorities and the switching fabric</a>
+        </h3>
+<p id="section-5.6-1">Packet priorities are most useful at the egress ports of TOR switches,
+since this is where congestion is most likely to occur. It is unclear
+whether there is any benefit to using priorities for other egress ports
+within the switching fabric. Congestion is less likely to occur at these
+ports (see <a href="#secBuffers" class="auto internal xref">Section 9</a> for discussion) and the priorities computed by Homa may
+not make much sense within the switching fabric (the priorities for each
+receiver are computed independently, and the packets at an egress port
+within the fabric could represent a variety of receivers, so it doesn't
+make sense to compare their priorities).<a href="#section-5.6-1" class="pilcrow">¶</a></p>
+</section>
+</div>
+</section>
+</div>
+<div id="secRetrans">
+<section id="section-6">
+      <h2 id="name-retransmission-and-timeouts">
+<a href="#section-6" class="section-number selfRef">6. </a><a href="#name-retransmission-and-timeouts" class="section-name selfRef">Retransmission and Timeouts</a>
+      </h2>
+<p id="section-6-1">Homa uses unreliable datagram protocols for packet delivery, so it
+must be prepared to retransmit lost packets. In Homa, retransmission of
+message data is requested explicitly by the receiver of the message,
+using <code>RESEND</code> packets as described in <a href="#secResendPkt" class="auto internal xref">Section 3.4</a>.<a href="#section-6-1" class="pilcrow">¶</a></p>
+<div id="when-to-issue-resends">
+<section id="section-6.1">
+        <h3 id="name-when-to-issue-resends">
+<a href="#section-6.1" class="section-number selfRef">6.1. </a><a href="#name-when-to-issue-resends" class="section-name selfRef">When to issue RESENDs</a>
+        </h3>
+<p id="section-6.1-1"><code>RESEND</code> packets are triggered by lack of progress in a message.
+Specifically, if a period of time elapses without the arrival
+of an expected data packet, then the receiver for the message
+issues a <code>RESEND</code>
+packet for the missing data. Ultimate responsibility for <code>RESEND</code>s
+lies with the client: if it has not received the entire response
+message within an expected time then it <span class="bcp14">MUST</span> issue <code>RESEND</code> request(s)
+for the missing part(s) of the response. The client <span class="bcp14">MUST</span> issue
+<code>RESEND</code>s for the response even if the request message has not been
+fully transmitted, for reasons given in the next paragraph.<a href="#section-6.1-1" class="pilcrow">¶</a></p>
+<p id="section-6.1-2">Servers <span class="bcp14">MUST</span> issues <code>RESEND</code>s for missing parts of the request message;
+these <span class="bcp14">MAY</span>
+be triggered in either of two ways. First, the server <span class="bcp14">MAY</span> set its own timers
+to track progress on request messages and then issue <code>RESEND</code>s if
+packets do not arrive in a timely fashion. However, these timers are
+not sufficient because all of the packets of the request message may be
+lost. If this happens the server will have no knowledge of the RPC and
+cannot issue <code>RESEND</code>s. However, the client will eventually
+send a <code>RESEND</code> for the response. If a <code>RESEND</code> arrives at a server
+for an unknown RPC, then the server <span class="bcp14">MUST</span> issue an <code>RPC_UNKNOWN</code> packet.
+On receipt of the <code>RPC_UNKNOWN</code>, the client retransmits everything
+it has previsouly sent. A server <span class="bcp14">MAY</span> choose not to set its own
+timers and to rely entirely on <code>RESEND</code> requests sent by clients.<a href="#section-6.1-2" class="pilcrow">¶</a></p>
+<p id="section-6.1-3">Choosing the <em>resend interval</em> (how long to wait for expected data before
+issuing <code>RESEND</code>s) involves a tradeoff among several considerations:<a href="#section-6.1-3" class="pilcrow">¶</a></p>
+<ul class="normal">
+<li class="normal" id="section-6.1-4.1">
+            <p id="section-6.1-4.1.1">If a packet has been lost, it is desirable to issue the <code>RESEND</code> as
+quickly as possible; long resend intervals introduce unnecessary
+delays.<a href="#section-6.1-4.1.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-6.1-4.2">
+            <p id="section-6.1-4.2.1">Short resend intervals create unnecessary overheads if packets are
+delayed but not actually lost. For example, on Linux
+servers as of December 2025, packets occasionally experience
+software processing delays of 5ms or more on the receiving host.<a href="#section-6.1-4.2.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-6.1-4.3">
+            <p id="section-6.1-4.3.1"><code>RESEND</code>s will occur when the service time for an RPC is longer than
+the resend interval. These <code>RESEND</code>s are unnecessary and waste resources,
+so the resend interval should be large enough to cover most service
+times.<a href="#section-6.1-4.3.1" class="pilcrow">¶</a></p>
+</li>
+        </ul>
+<p id="section-6.1-5">In the Linux kernel implementation of Homa, the resend interval is
+currently 5 ms.<a href="#section-6.1-5" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="avoiding-unnecessary-resends">
+<section id="section-6.2">
+        <h3 id="name-avoiding-unnecessary-resend">
+<a href="#section-6.2" class="section-number selfRef">6.2. </a><a href="#name-avoiding-unnecessary-resend" class="section-name selfRef">Avoiding unnecessary RESENDs</a>
+        </h3>
+<p id="section-6.2-1">There are some situations where <code>DATA</code> packets for a message do not arrive,
+but the receiver can determine from its own state that it should not expect
+those packets to arrive until it takes additional steps. In such situations
+endpoints <span class="bcp14">SHOULD NOT</span> send extraneous <code>RESEND</code>s. Here are a few examples:<a href="#section-6.2-1" class="pilcrow">¶</a></p>
+<ul class="normal">
+<li class="normal" id="section-6.2-2.1">
+            <p id="section-6.2-2.1.1">If all granted bytes have been received, then a receiver should not issue
+<code>RESEND</code>s for bytes that have not yet been granted.<a href="#section-6.2-2.1.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-6.2-2.2">
+            <p id="section-6.2-2.2.1">If a client has not yet transmitted all of the granted (or unscheduled)
+bytes for a request message, it should not issue a <code>RESEND</code> for the response.<a href="#section-6.2-2.2.1" class="pilcrow">¶</a></p>
+</li>
+        </ul>
+</section>
+</div>
+<div id="responding-to-resends">
+<section id="section-6.3">
+        <h3 id="name-responding-to-resends">
+<a href="#section-6.3" class="section-number selfRef">6.3. </a><a href="#name-responding-to-resends" class="section-name selfRef">Responding to RESENDs</a>
+        </h3>
+<p id="section-6.3-1">When an endpoint receives a <code>RESEND</code> packet it <span class="bcp14">MUST</span> respond in order to prevent
+timeouts at the packet's sender. It <span class="bcp14">MAY</span> respond in either of three ways:<a href="#section-6.3-1" class="pilcrow">¶</a></p>
+<ul class="normal">
+<li class="normal" id="section-6.3-2.1">
+            <p id="section-6.3-2.1.1">The endpoint receiving the <code>RESEND</code> <span class="bcp14">MAY</span> retransmit the range of bytes
+requested in the <code>RESEND</code> packet (it <span class="bcp14">MUST</span> set the <code>Retrans</code> flag in each
+retransmitted DATA packet).<a href="#section-6.3-2.1.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-6.3-2.2">
+            <p id="section-6.3-2.2.1">The endpoint receiving the <code>RESEND</code> <span class="bcp14">MAY</span> respond with <code>RPC_UNKNOWN</code>. This
+happens if the receiver of the <code>RESEND</code> is the server for the RPC, but it has
+not yet received any packets for the RPC (either <code>DATA</code> or <code>START_MSG</code>).<a href="#section-6.3-2.2.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-6.3-2.3">
+            <p id="section-6.3-2.3.1">The endpoint receiving the <code>RESEND</code> <span class="bcp14">MAY</span> respond with a BUSY packet. This
+indicates that the recipient of the <code>RESEND</code> is alive and aware of the message but is not
+yet prepared to transmit the requested data. This can happen if a server
+receives a <code>RESEND</code> for an RPC's response at a time when it has received
+the entire request but the RPC is still being serviced so the response
+message is not yet ready. This can also happen if the endpoint receiving
+the <code>RESEND</code> has chosen not to transmit the "missing" data (e.g., it is
+using all of its uplink bandwidth for higher priority transmissions).<a href="#section-6.3-2.3.1" class="pilcrow">¶</a></p>
+</li>
+        </ul>
+</section>
+</div>
+<div id="timeouts">
+<section id="section-6.4">
+        <h3 id="name-timeouts">
+<a href="#section-6.4" class="section-number selfRef">6.4. </a><a href="#name-timeouts" class="section-name selfRef">Timeouts</a>
+        </h3>
+<p id="section-6.4-1">If an endpoint issues multiple <code>RESEND</code> packets for an RPC and receives no
+response from the peer endpoint, the peer is considered to have failed.
+When this happens, all RPCs involving that endpoint <span class="bcp14">SHOULD</span> be aborted.<a href="#section-6.4-1" class="pilcrow">¶</a></p>
+<p id="section-6.4-2">An endpoint <span class="bcp14">SHOULD NOT</span> delete per-peer state for a timed-out endpoint,
+such as unscheduled priority cutoffs. This is because the peer might
+not have actually crashed. It is possible that the timeout occurred
+because of a disruption in communication, but the peer is still alive
+and will eventually resume communication.<a href="#section-6.4-2" class="pilcrow">¶</a></p>
+<p id="section-6.4-3">An endpoint <span class="bcp14">SHOULD NOT</span> timeout a peer until multiple <code>RESEND</code> packets
+have been issued with no response. This is because any given <code>RESEND</code>
+packet could potentially be lost. Timeouts are expected to be infrequent
+and the consequences of a timeout are relatively severe, so it is
+better to wait long enough to be certain that the peer has
+crashed or is unreachable.<a href="#section-6.4-3" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="retransmitting-startmsg-packets">
+<section id="section-6.5">
+        <h3 id="name-retransmitting-start_msg-pa">
+<a href="#section-6.5" class="section-number selfRef">6.5. </a><a href="#name-retransmitting-start_msg-pa" class="section-name selfRef">Retransmitting <code>START_MSG</code> Packets</a>
+        </h3>
+<p id="section-6.5-1">If an endpoint transmits a <code>START_MSG</code> packet for a scheduled message
+and receives no <code>GRANT</code> packets for that message, it must eventually
+retransmit the <code>START_MSG</code> packet, in case the original <code>START_MSG</code>
+was lost. If an endpoint receives a <code>START_MSG</code> packet for a message
+that it is already aware of, it should transmit either a <code>GRANT</code> or
+<code>BUSY</code> packet in response.<a href="#section-6.5-1" class="pilcrow">¶</a></p>
+</section>
+</div>
+</section>
+</div>
+<div id="secAcks">
+<section id="section-7">
+      <h2 id="name-at-most-once-semantics">
+<a href="#section-7" class="section-number selfRef">7. </a><a href="#name-at-most-once-semantics" class="section-name selfRef">At-Most-Once Semantics</a>
+      </h2>
+<p id="section-7-1">While a server retains state for an RPC, it <span class="bcp14">MUST NOT</span> pass that request
+to the server application more than once. This duplicate-suppression
+property does not guarantee at-most-once execution after the server
+reclaims the RPC state, crashes, or restarts. In those cases, a delayed
+or retried request can be treated as a new RPC and can be executed
+again. Applications that require at-most-once effects across state
+reclamation, crashes, or retries need application-level deduplication
+that persists across those events.<a href="#section-7-1" class="pilcrow">¶</a></p>
+<p id="section-7-2">Duplicate suppression requires careful management of RPC state on
+servers. The server creates internal state for an RPC
+when it receives the first <code>DATA</code> packet for that RPC. Under normal
+conditions the state will be retained until the RPC has been executed
+by the application and the result has been returned to the client.<a href="#section-7-2" class="pilcrow">¶</a></p>
+<p id="section-7-3">Up until the request message is passed to the server application for
+execution, the server <span class="bcp14">MAY</span> delete its state for the RPC. Once the
+request message has been passed to the server application, the server
+endpoint <span class="bcp14">MUST</span> retain its state
+for the RPC until the client has received the response message or
+the server has reason to believe the client has crashed.
+If a server deletes its state before one of these events occurs, a
+<code>RESEND</code> from the client could cause the creation of a new RPC on the
+server. Applications requiring duplicate suppression beyond the
+lifetime of this endpoint state need a separate, durable mechanism.<a href="#section-7-3" class="pilcrow">¶</a></p>
+<p id="section-7-4">Homa includes an acknowledgment mechanism that clients use to notify
+servers that they have received the full response for an RPC; this
+indicates to the server that it can safely delete its state for the
+RPC. Acknowledgments <span class="bcp14">MAY</span> be made in either of two different ways:<a href="#section-7-4" class="pilcrow">¶</a></p>
+<ul class="normal">
+<li class="normal" id="section-7-5.1">
+          <p id="section-7-5.1.1">The acknowledgment for an RPC <span class="bcp14">MAY</span> be piggybacked on a future <code>DATA</code>
+packet sent by the client. Each <code>DATA</code> packet includes space in its header
+to acknowledge one RPC.<a href="#section-7-5.1.1" class="pilcrow">¶</a></p>
+</li>
+        <li class="normal" id="section-7-5.2">
+          <p id="section-7-5.2.1">A client <span class="bcp14">MAY</span> send an explicit <code>ACK</code> packet, which may contain multiple
+acknowledgments.  This form may be useful if a client has RPCs to
+acknowledge but no new RPCs to use for piggybacking acknowledgments.
+<code>ACK</code>s are also sent in response to <code>NEED_ACK</code> packets, as discussed
+below.<a href="#section-7-5.2.1" class="pilcrow">¶</a></p>
+</li>
+      </ul>
+<p id="section-7-6">Acknowledgments are not reliable. Both <code>DATA</code> and <code>ACK</code> packets may be lost,
+and there is no way for a client to know whether an acknowledgment has been
+received by the server. Although clients <span class="bcp14">SHOULD</span> attempt to acknowledge
+each completed RPC, they <span class="bcp14">MAY</span> delete information about a pending
+acknowledgment once it has been included in a <code>DATA</code> or <code>ACK</code> packet.<a href="#section-7-6" class="pilcrow">¶</a></p>
+<p id="section-7-7">If a server fails to receive an acknowledgment within a reasonable
+time after sending the last <code>DATA</code> packet for a response message,
+then it <span class="bcp14">MUST</span> request an acknowledgment for the RPC using a <code>NEED_ACK</code>
+packet. When a client receives a <code>NEED_ACK</code> packet, it <span class="bcp14">MUST</span> return
+an <code>ACK</code> packet unless it can determine that it has not received
+the RPC's response. A client must return an <code>ACK</code> if it has no
+state for the RPC (this is likely to be the case, since the client
+can delete its state for an RPC once it has received the response).<a href="#section-7-7" class="pilcrow">¶</a></p>
+<p id="section-7-8">If a client receives a <code>NEED_ACK</code> packet for an RPC with an incomplete
+response, it <span class="bcp14">MUST NOT</span> return an <code>ACK</code> packet. However, it
+<span class="bcp14">MAY</span> issue <code>RESEND</code> requests for missing packets at this time.<a href="#section-7-8" class="pilcrow">¶</a></p>
+<p id="section-7-9"><code>NEED_ACK</code> packets are not reliable, so servers <span class="bcp14">MUST</span> continue to issue
+<code>NEED_ACK</code> requests for an RPC until an acknowledgment has been received.
+ If an extended period of time elapses with no communication of any
+ sort from the peer endpoint for the RPC, then the server <span class="bcp14">MAY</span> assume
+ that the client has crashed and reclaim its state for the RPC.<a href="#section-7-9" class="pilcrow">¶</a></p>
+<p id="section-7-10">An extended disruption of communication can cause the server to assume
+a client crash and delete its state for the RPC. The timeout period on
+the server <span class="bcp14">MUST</span> be long enough so that even if the client has not
+actually crashed it will have timed out the RPC on its end and aborted
+it.<a href="#section-7-10" class="pilcrow">¶</a></p>
+<div id="discussion">
+<section id="section-7.1">
+        <h3 id="name-discussion">
+<a href="#section-7.1" class="section-number selfRef">7.1. </a><a href="#name-discussion" class="section-name selfRef">Discussion</a>
+        </h3>
+<p id="section-7.1-1">The duplicate-suppression property above does not prevent a delayed
+request from being executed again after the server has deleted its RPC
+state. Preventing this requires additional state to detect old requests,
+such as a per-client high-water mark of processed RPC identifiers.
+This document does not specify such a mechanism.<a href="#section-7.1-1" class="pilcrow">¶</a></p>
+<p id="section-7.1-2">It is questionable whether at-most-once semantics are worth the complexity
+they add to the protocol. Applications generally expect it, so not
+attempting to provide it could discourage Homa adoption.
+However, applications are likely to retry operations after
+server crashes, which can lead to multiple executions. Thus, the
+only truly safe approach is for duplicate executions to be detected and
+discarded at application level. This isn't a problem that can be solved
+entirely by network transport.<a href="#section-7.1-2" class="pilcrow">¶</a></p>
+</section>
+</div>
+</section>
+</div>
+<div id="secPacer">
+<section id="section-8">
+      <h2 id="name-pacing">
+<a href="#section-8" class="section-number selfRef">8. </a><a href="#name-pacing" class="section-name selfRef">Pacing</a>
+      </h2>
+<p id="section-8-1">Homa endpoints <span class="bcp14">MUST</span> implement an SRPT policy for packet transmission,
+where packets from short messages are given priority for transmission
+over those from long messages. However, few if any NICs  support a notion
+of transmit priority: packets will be transmitted (roughly) in the order
+in which they were enqueued at the NIC. If a long queue of transmit packets
+builds up in the NIC, then a new packet for a short
+message will suffer head-of-line blocking in the NIC transmit queue.
+Homa endpoints <span class="bcp14">MUST</span> attempt to reduce head-of-line blocking delays in
+the NIC for short messages.<a href="#section-8-1" class="pilcrow">¶</a></p>
+<p id="section-8-2">To prevent head-of-line blocking delays in NICs that do not support
+priorities, Homa endpoints <span class="bcp14">MUST</span> limit the buildup of transmit queues
+in the NIC. One way to do this is with a <em>pacer</em>, which throttles the
+rate at which packets are enqueued in the NIC so that it doesn't exceed
+the link speed.  If a large number of outbound packets arrive suddenly,
+most of them will be queued in the pacer, not in the NIC.  The pacer
+queue can be managed with SRPT so that short messages are not
+delayed by long ones.<a href="#section-8-2" class="pilcrow">¶</a></p>
+<p id="section-8-3">Here are some considerations for the design of the pacing mechanism:<a href="#section-8-3" class="pilcrow">¶</a></p>
+<ul class="normal">
+<li class="normal" id="section-8-4.1">
+          <p id="section-8-4.1.1">The timing of a software pacing mechanism is not perfectly predictable
+(e.g., the pacer could be delayed by interrupts)
+so the pacer must allow a small queue in the NIC in
+order to keep the uplink fully utilized if the pacer is momentarily
+non-responsive. In the Linux kernel implementation, 5 μs worth of data seems
+to be adequate.<a href="#section-8-4.1.1" class="pilcrow">¶</a></p>
+</li>
+        <li class="normal" id="section-8-4.2">
+          <p id="section-8-4.2.1">The pacing mechanism must include all outbound network traffic,
+including packets from TCP and other non-Homa protocols. Otherwise
+non-Homa traffic can generate long NIC queues, which will degrade
+Homa performance.<a href="#section-8-4.2.1" class="pilcrow">¶</a></p>
+</li>
+        <li class="normal" id="section-8-4.3">
+          <p id="section-8-4.3.1">The pacer should limit output to just slightly less than the network
+bandwidth in order to be safe. If it errs and generates output at
+a rate even slightly higher than the network bandwidth, long queues
+will build up in the NIC during bursts of high load.<a href="#section-8-4.3.1" class="pilcrow">¶</a></p>
+</li>
+        <li class="normal" id="section-8-4.4">
+          <p id="section-8-4.4.1">Unfortunately, NICs cannot always transmit packets at full link speed;
+for example, measurements of 100 Gbps Intel NICs in December 2025 showed
+NIC output as low as 80% of link bandwidth even with a large backlog of
+(mixed-size) output packets. As a result, with this approach alone NIC
+queues frequently build up (measurements showed total NIC backlogs of
+5 MB or more under high network load). If the pacing rate is reduced to
+a level where the NIC can always keep up, it would sacrifice link bandwidth
+in the normal case where the NIC can transmit at line rate.<a href="#section-8-4.4.1" class="pilcrow">¶</a></p>
+</li>
+        <li class="normal" id="section-8-4.5">
+          <p id="section-8-4.5.1">Thus the Linux kernel implementation of Homa also uses a second approach,
+which is based on information maintained by the Linux dynamic queue limits
+mechanism (DQL). DQL keeps counters that indicate how many bytes of
+packet data are in the NIC's possession (i.e. packets that have been passed
+to the NIC but not yet returned after transmission). If the number of
+outstanding bytes exceeds a limit then the NIC is considered congested and
+Homa will stop queuing more packets until the congestion subsides.
+Measurements in January 2026 indicate that this reduces worst-case total
+NIC queuing by 2-3x.<a href="#section-8-4.5.1" class="pilcrow">¶</a></p>
+</li>
+        <li class="normal" id="section-8-4.6">
+          <p id="section-8-4.6.1">It might seem that the second approach is sufficient by itself, so the
+first approach is not needed. Unfortunately there can be a significant lag
+(10's of μsecs) between when a packet is transmitted and when the DQL
+counters get updated. In order to keep the NIC running at line rate,
+The NIC must be allowed to buffer enough data to cover that lag (40 μsecs as
+of May 2026); this means that outgoing packets can be queued for as much
+as 40 μsecs. In contrast, the rate-based pacing mechanism can limit
+NIC buffers to about 5 μsecs, which provides a much tighter bound on NIC
+queue length. Thus, tail latency for short messages is minimized with a
+dual approach: the time-based pacing mechanism keeps the NIC queue very
+short in the normal case where the NIC can transmit at full link speed,
+and the DQL-based mechanism limits queue buildup in situations where the
+NIC can't transmit at full link speed. Measurements in May 2026 indicate
+that disabling either of these techniques increases P99 latency for
+short messages by 10-15%.<a href="#section-8-4.6.1" class="pilcrow">¶</a></p>
+</li>
+        <li class="normal" id="section-8-4.7">
+          <p id="section-8-4.7.1">It may make sense for the shortest packets to bypass the pacing mechanism
+completely (transmit them immediately without checking for NIC congestion).
+This is done in the Linux kernel implementation because (a)  it reduces tail
+latency significantly for short packets, (b) modern machines cannot
+generate enough short packets to cause NIC queue buildup, and (c) the
+the mechanism for transmitting deferred packets is implemented in a single
+thread, which doesn't have enough throughput to handle all the short
+packets at high load (whereas the normal processing for packets that are
+not deferred happens concurrently on multiple cores).<a href="#section-8-4.7.1" class="pilcrow">¶</a></p>
+</li>
+      </ul>
+<p id="section-8-5">When implementing an SRPT policy for packet transmission, Homa
+endpoints <span class="bcp14">MAY</span> choose to reserve a small amount of outbound
+bandwidth for the oldest message in order to prevent starvation.
+The motivation for this is similar to the FIFO granting mechanism
+described in <a href="#secGrants" class="auto internal xref">Section 4</a>.<a href="#section-8-5" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="secBuffers">
+<section id="section-9">
+      <h2 id="name-managing-buffer-occupancy-i">
+<a href="#section-9" class="section-number selfRef">9. </a><a href="#name-managing-buffer-occupancy-i" class="section-name selfRef">Managing Buffer Occupancy in Switches</a>
+      </h2>
+<p id="section-9-1">Homa's performance will degrade badly if packets are dropped frequently
+because of buffer overflows in the network switches (occasional packet
+drops are not problematic). Homa does not depend on packet drops for a
+congestion signal, so in principle there should be no packet drops.
+However, modern switches have limited buffer space and the amount of
+switch buffer memory is not increasing as quickly as network bandwidth.
+This increases the likelihood that switch buffers will overflow.<a href="#section-9-1" class="pilcrow">¶</a></p>
+<div id="sources-of-buffer-buildup">
+<section id="section-9.1">
+        <h3 id="name-sources-of-buffer-buildup">
+<a href="#section-9.1" class="section-number selfRef">9.1. </a><a href="#name-sources-of-buffer-buildup" class="section-name selfRef">Sources of buffer buildup</a>
+        </h3>
+<p id="section-9.1-1">The most common location for buffer buildup is at the edge downlinks from
+TORs to hosts. Queuing is caused by incast,
+where multiple senders transmit simltaneously to the same receiver.
+Assuming all links have the same bandwidth, there is no way for the
+receiver's downlink to transmit packets as fast as they arrive
+at the TOR.<a href="#section-9.1-1" class="pilcrow">¶</a></p>
+<p id="section-9.1-2">Homa gives receivers considerable control over their incoming
+traffic, and thus over buffer buildup. However, queuing at TOR
+downlinks can still happen in 2 ways:<a href="#section-9.1-2" class="pilcrow">¶</a></p>
+<ul class="normal">
+<li class="normal" id="section-9.1-3.1">
+            <p id="section-9.1-3.1.1">Unscheduled messages. Senders can transmit unscheduled messages
+without receiving permission in advance from receivers. This feature
+provides a significant latency benefit, but it carries the risk of
+buffer buildup. There is no limit to how many senders
+can transmit unscheduled messages to the same receiver at once.<a href="#section-9.1-3.1.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-9.1-3.2">
+            <p id="section-9.1-3.2.1">Overcommitment. Receivers intentionally issue grants to multiple
+incoming messages at once; this will result in
+buffer buildup in the switch. The buffer buildup from granted packets
+is limited by the degree of overcommitment: as discussed previously
+in <a href="#secGrants" class="auto internal xref">Section 4</a>, the
+worst-case packet queuing in the switch from grants will be equal to the
+receiver's total incoming data, minus one BDP.<a href="#section-9.1-3.2.1" class="pilcrow">¶</a></p>
+</li>
+        </ul>
+<p id="section-9.1-4">Both forms of queuing can happen simultaneously.<a href="#section-9.1-4" class="pilcrow">¶</a></p>
+<p id="section-9.1-5">Buffer buildup can also occur within the switching fabric, for example
+if multiple long messages are routed across the same internal link in
+the fabric.<a href="#section-9.1-5" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="configuring-the-network">
+<section id="section-9.2">
+        <h3 id="name-configuring-the-network">
+<a href="#section-9.2" class="section-number selfRef">9.2. </a><a href="#name-configuring-the-network" class="section-name selfRef">Configuring the network</a>
+        </h3>
+<p id="section-9.2-1">Network switches <span class="bcp14">SHOULD</span> configured in 2 ways to reduce the likelihood of
+buffer overflows for Homa:<a href="#section-9.2-1" class="pilcrow">¶</a></p>
+<ul class="normal">
+<li class="normal" id="section-9.2-2.1">
+            <p id="section-9.2-2.1.1">Buffer space within a switch <span class="bcp14">SHOULD</span> be shared dynamically across
+egress ports, rather than statically allocating
+space to each port. This is particularly important for the TOR
+downlinks: when incast occurs at one port, there will be other
+ports that are underutilized. It is unlikely that there will be large
+queues on many egress ports simultaneously.<a href="#section-9.2-2.1.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-9.2-2.2">
+            <p id="section-9.2-2.2.1">Packet spraying <span class="bcp14">SHOULD</span> be used for Homa packets within the switching
+fabric (i.e.  different packets within a message may take different
+paths through the fabric in order to balance loading within the fabric).
+In contrast, TCP requires flow-consistent routing: packet reorderings
+cause problems for TCP, so all of the packets within a TCP flow must
+follow the same path through the fabric to prevent reorderings.
+With flow-consistent routing, queues can build up in the fabric if
+two flows happen to share an internal link within the fabric; this
+can occur even if the fabric overall is underutilized. With
+packet spraying, queues are unlikely to form in the fabric unless
+the entire fabric is running at near-capacity (and modern datacenters
+are generally configured with excess fabric capacity).<a href="#section-9.2-2.2.1" class="pilcrow">¶</a></p>
+</li>
+        </ul>
+</section>
+</div>
+<div id="dealing-with-inadequate-buffer-space">
+<section id="section-9.3">
+        <h3 id="name-dealing-with-inadequate-buf">
+<a href="#section-9.3" class="section-number selfRef">9.3. </a><a href="#name-dealing-with-inadequate-buf" class="section-name selfRef">Dealing with inadequate buffer space</a>
+        </h3>
+<p id="section-9.3-1">Depending on the workload, the network speed, and the available switch
+buffer space, it is possible that packet drops may occur for Homa
+at an unacceptably high level. If this happens, Homa can be modified
+in two ways to reduce its buffer utilization.<a href="#section-9.3-1" class="pilcrow">¶</a></p>
+<ul class="normal">
+<li class="normal" id="section-9.3-2.1">
+            <p id="section-9.3-2.1.1">Reduce the amount of maximum allowed size for unscheduled messages.
+Scheduled messages suffer an additional 1 RTT of delay for the
+<code>START_MSG</code> packet and the first <code>GRANT</code> packet before data
+transmission begins; reducing the maximum unscheduled size will
+increase the number of messages that pay this additional latency.<a href="#section-9.3-2.1.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-9.3-2.2">
+            <p id="section-9.3-2.2.1">Use grants to limit the total amount of incoming data. To do this,
+Homa endpoints <span class="bcp14">SHOULD</span> keep track of their total incoming data,
+including both unscheduled and scheduled data.
+An adjustable limit <span class="bcp14">SHOULD</span> be supported, such that grants will not
+be issued when total incoming data exceeds the limit. As the limit
+is reduced, Homa endpoints <span class="bcp14">SHOULD</span> either reduce the degree of
+overcommitment or reduce the amount of incoming for each message
+below one BDP.  Each of these reductions will have some impact
+on throughput, but this impact is likely to be less damaging
+than the impact of frequent packet drops.<a href="#section-9.3-2.2.1" class="pilcrow">¶</a></p>
+</li>
+        </ul>
+</section>
+</div>
+</section>
+</div>
+<div id="acknowledgments">
+<section id="section-10">
+      <h2 id="name-acknowledgments">
+<a href="#section-10" class="section-number selfRef">10. </a><a href="#name-acknowledgments" class="section-name selfRef">Acknowledgments</a>
+      </h2>
+<p id="section-10-1">TBD<a href="#section-10-1" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="security-considerations">
+<section id="section-11">
+      <h2 id="name-security-considerations">
+<a href="#section-11" class="section-number selfRef">11. </a><a href="#name-security-considerations" class="section-name selfRef">Security Considerations</a>
+      </h2>
+<p id="section-11-1">This area is currently almost completely unaddressed in Homa. We would
+welcome help identifying potential threats and other security issues.<a href="#section-11-1" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="iana-considerations">
+<section id="section-12">
+      <h2 id="name-iana-considerations">
+<a href="#section-12" class="section-number selfRef">12. </a><a href="#name-iana-considerations" class="section-name selfRef">IANA Considerations</a>
+      </h2>
+<p id="section-12-1">IANA has assigned IP protocol number 146 for Homa.<a href="#section-12-1" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="questions-and-unresolved-issues">
+<section id="section-13">
+      <h2 id="name-questions-and-unresolved-is">
+<a href="#section-13" class="section-number selfRef">13. </a><a href="#name-questions-and-unresolved-is" class="section-name selfRef">Questions and Unresolved Issues</a>
+      </h2>
+<p id="section-13-1">The following questions are included to invite feedback from interested parties. Their resolution may require further
+discussion before this document can serve as a complete interoperable
+protocol specification.<a href="#section-13-1" class="pilcrow">¶</a></p>
+<div id="requirement-language-policy-and-implementation-guidance">
+<section id="section-13.1">
+        <h3 id="name-requirement-language-policy">
+<a href="#section-13.1" class="section-number selfRef">13.1. </a><a href="#name-requirement-language-policy" class="section-name selfRef">Requirement language, policy, and implementation guidance</a>
+        </h3>
+<ul class="normal">
+<li class="normal" id="section-13.1-1.1">
+            <p id="section-13.1-1.1.1">How to decide whether to use <span class="bcp14">MUST</span> vs. <span class="bcp14">SHOULD</span>? E.g., if something
+only affects performance but not correctness, is that a <span class="bcp14">SHOULD</span>?<a href="#section-13.1-1.1.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-13.1-1.2">
+            <p id="section-13.1-1.2.1">To what degree should this document discuss policy choices, vs. just
+the mechanisms? In some cases, such as policies for issuing grants,
+it's not a problem if different endpoints use different policies.
+To what degree should that be reflected here?<a href="#section-13.1-1.2.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-13.1-1.3">
+            <p id="section-13.1-1.3.1">How much should this document reflect current hardware and software
+characteristics?<a href="#section-13.1-1.3.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-13.1-1.4">
+            <p id="section-13.1-1.4.1">Should this document describe details of the Linux implementation?
+This information might be useful to people writing new implementations.<a href="#section-13.1-1.4.1" class="pilcrow">¶</a></p>
+</li>
+        </ul>
+</section>
+</div>
+<div id="encapsulation-and-wire-format">
+<section id="section-13.2">
+        <h3 id="name-encapsulation-and-wire-form">
+<a href="#section-13.2" class="section-number selfRef">13.2. </a><a href="#name-encapsulation-and-wire-form" class="section-name selfRef">Encapsulation and wire format</a>
+        </h3>
+<ul class="normal">
+<li class="normal" id="section-13.2-1.1">
+            <p id="section-13.2-1.1.1">Which packet-carriage method should this version specify: Homa directly
+using IP protocol number 146, or Homa over UDP? Could the choice also
+define packet demultiplexing, checksum handling, address-family behavior,
+and any required IANA actions? Once UDP encapsulation is complete,
+should all mention of TCP hijacking be removed?<a href="#section-13.2-1.1.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-13.2-1.2">
+            <p id="section-13.2-1.2.1">What additional rules would independent implementers need for field
+encoding, the relationship between <code>Rpcid</code> and <code>S</code>, protocol versioning,
+malformed packets, and packet-size, path-MTU, or fragmentation behavior?<a href="#section-13.2-1.2.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-13.2-1.3">
+            <p id="section-13.2-1.3.1">Specify constants, such as largest message length and number of priorities?<a href="#section-13.2-1.3.1" class="pilcrow">¶</a></p>
+</li>
+        </ul>
+</section>
+</div>
+<div id="loss-recovery-and-endpoint-behavior">
+<section id="section-13.3">
+        <h3 id="name-loss-recovery-and-endpoint-">
+<a href="#section-13.3" class="section-number selfRef">13.3. </a><a href="#name-loss-recovery-and-endpoint-" class="section-name selfRef">Loss recovery and endpoint behavior</a>
+        </h3>
+<ul class="normal">
+<li class="normal" id="section-13.3-1.1">
+            <p id="section-13.3-1.1.1">Change to drive retransmission entirely from the client?<a href="#section-13.3-1.1.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-13.3-1.2">
+            <p id="section-13.3-1.2.1">Could sender and receiver state transitions be specified for packet
+loss, reordering, stale grants and cutoff updates, RESEND ranges,
+and ACK/NEED_ACK recovery?<a href="#section-13.3-1.2.1" class="pilcrow">¶</a></p>
+</li>
+        </ul>
+</section>
+</div>
+<div id="security-and-resource-limits">
+<section id="section-13.4">
+        <h3 id="name-security-and-resource-limit">
+<a href="#section-13.4" class="section-number selfRef">13.4. </a><a href="#name-security-and-resource-limit" class="section-name selfRef">Security and resource limits</a>
+        </h3>
+<ul class="normal">
+<li class="normal" id="section-13.4-1.1">
+            <p id="section-13.4-1.1.1">Could contributors help identify appropriate protections against spoofed
+or replayed packets, forged retransmission or state-release requests,
+and denial-of-service attacks?<a href="#section-13.4-1.1.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-13.4-1.2">
+            <p id="section-13.4-1.2.1">What resource bounds and endpoint behavior should be specified for
+incomplete RPCs, reassembly, outstanding state, and unscheduled traffic?<a href="#section-13.4-1.2.1" class="pilcrow">¶</a></p>
+</li>
+        </ul>
+</section>
+</div>
+<div id="congestion-priorities-and-deployment">
+<section id="section-13.5">
+        <h3 id="name-congestion-priorities-and-d">
+<a href="#section-13.5" class="section-number selfRef">13.5. </a><a href="#name-congestion-priorities-and-d" class="section-name selfRef">Congestion, priorities, and deployment</a>
+        </h3>
+<ul class="normal">
+<li class="normal" id="section-13.5-1.1">
+            <p id="section-13.5-1.1.1">What deployment assumptions should this document make about network
+congestion and coexistence with non-Homa traffic? Are additional
+requirements needed for priority mapping, fairness, starvation
+prevention, or network configuration?<a href="#section-13.5-1.1.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-13.5-1.2">
+            <p id="section-13.5-1.2.1">How to determine the limit for unscheduled messages? Include in CUTOFFS packets?<a href="#section-13.5-1.2.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-13.5-1.3">
+            <p id="section-13.5-1.3.1">Ideally, packet spraying should be used in the switching fabric. However,
+Homa should also be able to spray packets by varying one of the port fields.<a href="#section-13.5-1.3.1" class="pilcrow">¶</a></p>
+</li>
+        </ul>
+</section>
+</div>
+<div id="publication-scope">
+<section id="section-13.6">
+        <h3 id="name-publication-scope">
+<a href="#section-13.6" class="section-number selfRef">13.6. </a><a href="#name-publication-scope" class="section-name selfRef">Publication scope</a>
+        </h3>
+<ul class="normal">
+<li class="normal" id="section-13.6-1.1">
+            <p id="section-13.6-1.1.1">What publication category and IETF stream are appropriate for this
+document? Could the acknowledgments and other remaining editorial
+details also be finalized before RFC publication?<a href="#section-13.6-1.1.1" class="pilcrow">¶</a></p>
+</li>
+        </ul>
+</section>
+</div>
+</section>
+</div>
+<div id="sec-combined-references">
+<section id="section-14">
+      <h2 id="name-references">
+<a href="#section-14" class="section-number selfRef">14. </a><a href="#name-references" class="section-name selfRef">References</a>
+      </h2>
+<div id="sec-normative-references">
+<section id="section-14.1">
+        <h3 id="name-normative-references">
+<a href="#section-14.1" class="section-number selfRef">14.1. </a><a href="#name-normative-references" class="section-name selfRef">Normative References</a>
+        </h3>
+<dl class="references">
+<dt id="RFC2119">[RFC2119]</dt>
+        <dd>
+<span class="refAuthor">Bradner, S.</span>, <span class="refTitle">"Key words for use in RFCs to Indicate Requirement Levels"</span>, <span class="seriesInfo">BCP 14</span>, <span class="seriesInfo">RFC 2119</span>, <span class="seriesInfo">DOI 10.17487/RFC2119</span>, <time datetime="1997-03" class="refDate">March 1997</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc2119">https://www.rfc-editor.org/rfc/rfc2119</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+<dt id="RFC8174">[RFC8174]</dt>
+        <dd>
+<span class="refAuthor">Leiba, B.</span>, <span class="refTitle">"Ambiguity of Uppercase vs Lowercase in RFC 2119 Key Words"</span>, <span class="seriesInfo">BCP 14</span>, <span class="seriesInfo">RFC 8174</span>, <span class="seriesInfo">DOI 10.17487/RFC8174</span>, <time datetime="2017-05" class="refDate">May 2017</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc8174">https://www.rfc-editor.org/rfc/rfc8174</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+<dt id="RFC9293">[RFC9293]</dt>
+      <dd>
+<span class="refAuthor">Eddy, W., Ed.</span>, <span class="refTitle">"Transmission Control Protocol (TCP)"</span>, <span class="seriesInfo">STD 7</span>, <span class="seriesInfo">RFC 9293</span>, <span class="seriesInfo">DOI 10.17487/RFC9293</span>, <time datetime="2022-08" class="refDate">August 2022</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc9293">https://www.rfc-editor.org/rfc/rfc9293</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+</dl>
+</section>
+</div>
+<div id="sec-informative-references">
+<section id="section-14.2">
+        <h3 id="name-informative-references">
+<a href="#section-14.2" class="section-number selfRef">14.2. </a><a href="#name-informative-references" class="section-name selfRef">Informative References</a>
+        </h3>
+<dl class="references">
+<dt id="Homa">[Homa]</dt>
+        <dd>
+<span class="refAuthor">Montazeri, B.</span>, <span class="refAuthor">Li, Y.</span>, <span class="refAuthor">Alizadeh, M.</span>, and <span class="refAuthor">J. Ousterhout</span>, <span class="refTitle">"Homa: A Receiver-Driven Low-Latency Transport Protocol Using Network Priorities"</span>, <span class="seriesInfo">Proc. ACM SIGCOMM 2018, pp. 221–235 </span>, <time datetime="2018-08" class="refDate">August 2018</time>, <span>&lt;<a href="https://dl.acm.org/doi/10.1145/3230543.3230564">https://dl.acm.org/doi/10.1145/3230543.3230564</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+<dt id="HomaLinux">[HomaLinux]</dt>
+        <dd>
+<span class="refAuthor">Ousterhout, J.</span>, <span class="refTitle">"A Linux Kernel Implementation of the Homa Transport Protocol"</span>, <span class="seriesInfo">2021 USENIX Annual Technical Conference (USENIX ATC '21), pp. 773–787 </span>, <time datetime="2021-07" class="refDate">July 2021</time>, <span>&lt;<a href="https://www.usenix.org/system/files/atc21-ousterhout.pdf">https://www.usenix.org/system/files/atc21-ousterhout.pdf</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+<dt id="ReplaceTCP">[ReplaceTCP]</dt>
+        <dd>
+<span class="refAuthor">Ousterhout, J.</span>, <span class="refTitle">"It's Time to Replace TCP in the Datacenter"</span>, <time datetime="2023-01" class="refDate">January 2023</time>, <span>&lt;<a href="https://arxiv.org/abs/2210.00714">https://arxiv.org/abs/2210.00714</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+<dt id="RFC791">[RFC791]</dt>
+        <dd>
+<span class="refAuthor">Postel, J.</span>, <span class="refTitle">"Internet Protocol"</span>, <span class="seriesInfo">STD 5</span>, <span class="seriesInfo">RFC 791</span>, <span class="seriesInfo">DOI 10.17487/RFC791</span>, <time datetime="1981-09" class="refDate">September 1981</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc791">https://www.rfc-editor.org/rfc/rfc791</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+<dt id="RFC8200">[RFC8200]</dt>
+      <dd>
+<span class="refAuthor">Deering, S.</span> and <span class="refAuthor">R. Hinden</span>, <span class="refTitle">"Internet Protocol, Version 6 (IPv6) Specification"</span>, <span class="seriesInfo">STD 86</span>, <span class="seriesInfo">RFC 8200</span>, <span class="seriesInfo">DOI 10.17487/RFC8200</span>, <time datetime="2017-07" class="refDate">July 2017</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc8200">https://www.rfc-editor.org/rfc/rfc8200</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+</dl>
+</section>
+</div>
+</section>
+</div>
+<div id="authors-addresses">
+<section id="appendix-A">
+      <h2 id="name-authors-addresses">
+<a href="#name-authors-addresses" class="section-name selfRef">Authors' Addresses</a>
+      </h2>
+<address class="vcard">
+        <div dir="auto" class="left"><span class="fn nameRole">John Ousterhout</span></div>
+<div dir="auto" class="left"><span class="org">Stanford University</span></div>
+<div class="email">
+<span>Email:</span>
+<a href="mailto:ouster@cs.stanford.edu" class="email">ouster@cs.stanford.edu</a>
+</div>
+</address>
+<address class="vcard">
+        <div dir="auto" class="left"><span class="fn nameRole">Thiyagarajan Velappan</span></div>
+<div dir="auto" class="left"><span class="org">Mastercard, Inc.</span></div>
+<div class="email">
+<span>Email:</span>
+<a href="mailto:Thiyagarajan.Velappan@mastercard.com" class="email">Thiyagarajan.Velappan@mastercard.com</a>
+</div>
+</address>
+<address class="vcard">
+        <div dir="auto" class="left"><span class="fn nameRole">Steven Bagby</span></div>
+<div dir="auto" class="left"><span class="org">Mastercard, Inc.</span></div>
+<div class="email">
+<span>Email:</span>
+<a href="mailto:Steven.Bagby@mastercard.com" class="email">Steven.Bagby@mastercard.com</a>
+</div>
+</address>
+</section>
+</div>
+<script>const toc = document.getElementById("toc");
+toc.querySelector("h2").addEventListener("click", e => {
+  toc.classList.toggle("active");
+});
+toc.querySelector("nav").addEventListener("click", e => {
+  toc.classList.remove("active");
+});
+</script>
+</body>
+</html>
