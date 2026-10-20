@@ -5,9 +5,9 @@
 TSVWG Working Group                                        J. Ousterhout
 Internet-Draft                                       Stanford University
 Intended status: Informational                               T. Velappan
-Expires: 22 April 2027                                          S. Bagby
+Expires: 23 April 2027                                          S. Bagby
                                                         Mastercard, Inc.
-                                                         19 October 2026
+                                                         20 October 2026
 
 
             Homa: An RPC Transport Protocol for Datacenters
@@ -18,24 +18,12 @@ Abstract
    This document defines the Homa transport protocol.  Homa provides
    applications with a reliable and efficient mechanism for delivering
    request and response messages for remote procedure calls (RPCs).  It
-   is intended for use within datacenters and provides significant
-   performance improvements over TCP in this environment.
-
-About This Document
-
-   This note is to be removed before publishing as an RFC.
-
-   The latest revision of this draft can be found at
-   https://example.com/LATEST.  Status information for this document may
-   be found at https://datatracker.ietf.org/doc/draft-ousterhout-tsvwg-
-   homa/.
-
-   Discussion of this document takes place on the TSVWG Working Group
-   mailing list (mailto:WG@example.com), which is archived at
-   https://example.com/WG.
-
-   Source for this draft and an issue tracker can be found at
-   https://github.com/USER/REPO.
+   is intended for use within datacenters.  Homa uses messages,
+   receiver-issued grants, and packet priorities to support RPC
+   workloads.  Published evaluations report a reduction of more than 10x
+   in tail latency for short messages relative to TCP for specific
+   workloads and test conditions; this document does not claim a
+   performance improvement for all datacenter environments.
 
 Status of This Memo
 
@@ -52,7 +40,7 @@ Status of This Memo
    time.  It is inappropriate to use Internet-Drafts as reference
    material or to cite them other than as "work in progress."
 
-   This Internet-Draft will expire on 22 April 2027.
+   This Internet-Draft will expire on 23 April 2027.
 
 Copyright Notice
 
@@ -113,6 +101,12 @@ Table of Contents
    11. Security Considerations
    12. IANA Considerations
    13. Questions and Unresolved Issues
+     13.1.  Requirement language, policy, and implementation guidance
+     13.2.  Encapsulation and wire format
+     13.3.  Loss recovery and endpoint behavior
+     13.4.  Security and resource limits
+     13.5.  Congestion, priorities, and deployment
+     13.6.  Publication scope
    14. References
      14.1.  Normative References
      14.2.  Informative References
@@ -134,14 +128,17 @@ Table of Contents
 
    *  Homa is connectionless.
 
-   *  Homa manages flow control and congestion from the receiver, not
-      the sender, and does not depend on buffer occupancy as a signal
-      for congestion.
+   *  Homa uses receiver-issued grants for flow control and does not
+      depend on buffer occupancy as a signal for congestion.  These
+      properties describe Homa's flow-control mechanism; they do not, by
+      themselves, specify congestion control for the switching fabric.
 
    *  Homa does not require in-order packet delivery.
 
-   The combination of all of these features allows Homa to achieve
-   significantly higher performance than TCP in datacenter environments.
+   These design choices target the latency and message-delivery
+   requirements of datacenter RPC workloads.  Performance depends on the
+   workload and deployment conditions; this document does not claim that
+   Homa outperforms TCP in every datacenter environment.
 
    Note: Homa is not suitable for use in WANs or other environments with
    high latency.  Homa is designed under the assumption of round-trip
@@ -151,19 +148,18 @@ Table of Contents
 
 1.1.  Background
 
-   In spite of its long and successful history, TCP is a mediocre
-   transport protocol for modern datacenters.  Every significant element
-   of TCP, from its stream orientation to its expectation of in-order
-   packet delivery, is wrong for the datacenter [ReplaceTCP].
-   Applications using TCP cannot achieve the full performance potential
-   of modern datacenter networking.
-
-   Homa is a clean-slate redesign of network transport for applications
-   running in datacenters.  As a result, Homa provides lower latency
-   than TCP across a wide range of message lengths and workloads.  Its
-   benefits are greatest for short messages in mixed workloads running
-   at high network utilization: lab experiments show 10-100x reduction
-   in tail latency under these conditions [HomaLinux].
+   TCP has been widely successful, but its byte-stream abstraction and
+   in-order delivery can add queuing and head-of-line delays for
+   datacenter RPC workloads, particularly when short messages share the
+   network with larger transfers.  Homa is a clean-slate, message-
+   oriented transport designed for applications running in datacenters.
+   It uses receiver-issued grants and packet priorities to address these
+   workload characteristics.  In lab experiments, Homa reduced tail
+   latency for short messages in mixed workloads at high network
+   utilization by 10-100x compared with TCP [HomaLinux].  These results
+   are specific to the evaluated workloads and test conditions; they
+   should not be interpreted as a general performance guarantee across
+   datacenter deployments.
 
    See [Homa] for more on the rationale for Homa, the original design of
    Homa (which differs somewhat from the protocol described here) and
@@ -1136,30 +1132,31 @@ Table of Contents
 
 7.  At-Most-Once Semantics
 
-   Homa endpoints MUST ensure that an RPC presented to Homa by a client
-   is executed on the server exactly once as long as neither the client
-   nor the server crashes and they can communicate.  If there is a crash
-   of either client or server during an RPC, or if there is an extended
-   disruption in communication, then the RPC MAY be executed on the
-   server either once or not at all.  RPCs MUST NOT ever be executed
-   more than once.
+   While a server retains state for an RPC, it MUST NOT pass that
+   request to the server application more than once.  This duplicate-
+   suppression property does not guarantee at-most-once execution after
+   the server reclaims the RPC state, crashes, or restarts.  In those
+   cases, a delayed or retried request can be treated as a new RPC and
+   can be executed again.  Applications that require at-most-once
+   effects across state reclamation, crashes, or retries need
+   application-level deduplication that persists across those events.
 
-   Ensuring at-most-once semantics requires careful management of RPC
-   state on servers.  The server creates internal state for an RPC when
-   it receives the first DATA packet for that RPC.  Under normal
-   conditions the state will be retained until the RPC has been executed
-   by the application and the result has been returned to the client.
+   Duplicate suppression requires careful management of RPC state on
+   servers.  The server creates internal state for an RPC when it
+   receives the first DATA packet for that RPC.  Under normal conditions
+   the state will be retained until the RPC has been executed by the
+   application and the result has been returned to the client.
 
    Up until the request message is passed to the server application for
-   execution, the server MAY delete its state for the RPC: this is not
-   generally advisable for performance reasons, but it is safe from the
-   standpoint of at-most-once semantics.  Once the request message has
-   been passed to the server application, the server endpoint MUST
-   retain its state for the RPC until the client has received the
-   response message or the server has reason to believe the client has
-   crashed.  If a server were to delete its state before one of these
-   events occurs, then a RESEND from the client could cause the creation
-   of a new RPC on the server, resulting in a second execution.
+   execution, the server MAY delete its state for the RPC.  Once the
+   request message has been passed to the server application, the server
+   endpoint MUST retain its state for the RPC until the client has
+   received the response message or the server has reason to believe the
+   client has crashed.  If a server deletes its state before one of
+   these events occurs, a RESEND from the client could cause the
+   creation of a new RPC on the server.  Applications requiring
+   duplicate suppression beyond the lifetime of this endpoint state need
+   a separate, durable mechanism.
 
    Homa includes an acknowledgment mechanism that clients use to notify
    servers that they have received the full response for an RPC; this
@@ -1211,14 +1208,11 @@ Table of Contents
 
 7.1.  Discussion
 
-   This mechanism is not quite adequate to prevent multiple executions.
-   If a request packet is delayed in the network long enough for the
-   server to receive its acknowledgment and delete its state, and if the
-   packet contains an entire request, it could trigger a second
-   execution on the server.  To prevent this, servers will need to
-   maintain additional state to detect long-delayed packets.  This might
-   include an rpcid for each client, such that all RPCs with rpcid's
-   less than or equal to this have been processed.
+   The duplicate-suppression property above does not prevent a delayed
+   request from being executed again after the server has deleted its
+   RPC state.  Preventing this requires additional state to detect old
+   requests, such as a per-client high-water mark of processed RPC
+   identifiers.  This document does not specify such a mechanism.
 
    It is questionable whether at-most-once semantics are worth the
    complexity they add to the protocol.  Applications generally expect
@@ -1435,14 +1429,17 @@ Table of Contents
 
 13.  Questions and Unresolved Issues
 
-   This section contains questions about how to organize this document,
-   plus issues that are not yet resolved in this spec (and in the
-   current Linux implementation of Homa) or that may be bugs.
+   The following questions are included to invite feedback from
+   interested parties.  Their resolution may require further discussion
+   before this document can serve as a complete interoperable protocol
+   specification.
+
+13.1.  Requirement language, policy, and implementation guidance
 
    *  How to decide whether to use MUST vs. SHOULD?  E.g., if something
       only affects performance but not correctness, is that a SHOULD?
 
-   *  To what degree should this document discusses policy choices, vs.
+   *  To what degree should this document discuss policy choices, vs.
       just the mechanisms?  In some cases, such as policies for issuing
       grants, it's not a problem if different endpoints use different
       policies.  To what degree should that be reflected here?
@@ -1454,20 +1451,60 @@ Table of Contents
       This information might be useful to people writing new
       implementations.
 
-   *  Ideally, packet spraying should be used in the switching fabric.
-      However, Homa should also be able to spray packets by varying one
-      of the port fields.
+13.2.  Encapsulation and wire format
+
+   *  Which packet-carriage method should this version specify: Homa
+      directly using IP protocol number 146, or Homa over UDP?  Could
+      the choice also define packet demultiplexing, checksum handling,
+      address-family behavior, and any required IANA actions?  Once UDP
+      encapsulation is complete, should all mention of TCP hijacking be
+      removed?
+
+   *  What additional rules would independent implementers need for
+      field encoding, the relationship between Rpcid and S, protocol
+      versioning, malformed packets, and packet-size, path-MTU, or
+      fragmentation behavior?
 
    *  Specify constants, such as largest message length and number of
       priorities?
 
-   *  How to determine the limit for unscheduled messages?  Include in
-      CUTOFFS packets?
+13.3.  Loss recovery and endpoint behavior
 
    *  Change to drive retransmission entirely from the client?
 
-   *  Eliminate all mention of TCP hijacking once the implementation of
-      UDP encapsulation is complete.
+   *  Could sender and receiver state transitions be specified for
+      packet loss, reordering, stale grants and cutoff updates, RESEND
+      ranges, and ACK/NEED_ACK recovery?
+
+13.4.  Security and resource limits
+
+   *  Could contributors help identify appropriate protections against
+      spoofed or replayed packets, forged retransmission or state-
+      release requests, and denial-of-service attacks?
+
+   *  What resource bounds and endpoint behavior should be specified for
+      incomplete RPCs, reassembly, outstanding state, and unscheduled
+      traffic?
+
+13.5.  Congestion, priorities, and deployment
+
+   *  What deployment assumptions should this document make about
+      network congestion and coexistence with non-Homa traffic?  Are
+      additional requirements needed for priority mapping, fairness,
+      starvation prevention, or network configuration?
+
+   *  How to determine the limit for unscheduled messages?  Include in
+      CUTOFFS packets?
+
+   *  Ideally, packet spraying should be used in the switching fabric.
+      However, Homa should also be able to spray packets by varying one
+      of the port fields.
+
+13.6.  Publication scope
+
+   *  What publication category and IETF stream are appropriate for this
+      document?  Could the acknowledgments and other remaining editorial
+      details also be finalized before RFC publication?
 
 14.  References
 

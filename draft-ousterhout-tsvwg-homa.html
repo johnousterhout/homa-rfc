@@ -12,13 +12,14 @@
        This document defines the Homa transport protocol. Homa provides
 applications with a reliable and efficient mechanism for delivering
 request and response messages for remote procedure calls (RPCs).
-It is intended for use within datacenters and provides significant
-performance improvements over TCP in this environment. 
+It is intended for use within datacenters. Homa uses messages,
+receiver-issued grants, and packet priorities to support RPC workloads.
+Published evaluations report a reduction of more than 10x in tail latency
+for short messages relative to TCP for specific workloads
+and test conditions; this document does not claim a performance
+improvement for all datacenter environments. 
     " name="description">
 <meta content="xml2rfc 3.34.1" name="generator">
-<meta content="next generation" name="keyword">
-<meta content="unicorn" name="keyword">
-<meta content="sparkling distributed ledger" name="keyword">
 <meta content="draft-ousterhout-tsvwg-homa-latest" name="ietf.draft">
 <!-- Generator version information:
   xml2rfc 3.34.1
@@ -1053,7 +1054,7 @@ svg {
 </tr></thead>
 <tfoot><tr>
 <td class="left">Ousterhout, et al.</td>
-<td class="center">Expires 22 April 2027</td>
+<td class="center">Expires 23 April 2027</td>
 <td class="right">[Page]</td>
 </tr></tfoot>
 </table>
@@ -1066,12 +1067,12 @@ svg {
 <dd class="internet-draft">draft-ousterhout-tsvwg-homa-latest</dd>
 <dt class="label-published">Published:</dt>
 <dd class="published">
-<time datetime="2026-10-19" class="published">19 October 2026</time>
+<time datetime="2026-10-20" class="published">20 October 2026</time>
     </dd>
 <dt class="label-intended-status">Intended Status:</dt>
 <dd class="intended-status">Informational</dd>
 <dt class="label-expires">Expires:</dt>
-<dd class="expires"><time datetime="2027-04-22">22 April 2027</time></dd>
+<dd class="expires"><time datetime="2027-04-23">23 April 2027</time></dd>
 <dt class="label-authors">Authors:</dt>
 <dd class="authors">
 <div class="author">
@@ -1095,23 +1096,12 @@ svg {
 <p id="section-abstract-1">This document defines the Homa transport protocol. Homa provides
 applications with a reliable and efficient mechanism for delivering
 request and response messages for remote procedure calls (RPCs).
-It is intended for use within datacenters and provides significant
-performance improvements over TCP in this environment.<a href="#section-abstract-1" class="pilcrow">¶</a></p>
-</section>
-<section class="note rfcEditorRemove" id="section-note.1">
-      <h2 id="name-about-this-document">
-<a href="#name-about-this-document" class="section-name selfRef">About This Document</a>
-      </h2>
-<p id="section-note.1-1">This note is to be removed before publishing as an RFC.<a href="#section-note.1-1" class="pilcrow">¶</a></p>
-<p id="section-note.1-2">
-        The latest revision of this draft can be found at <span><a href="https://example.com/LATEST">https://example.com/LATEST</a></span>.
-        Status information for this document may be found at <span><a href="https://datatracker.ietf.org/doc/draft-ousterhout-tsvwg-homa/">https://datatracker.ietf.org/doc/draft-ousterhout-tsvwg-homa/</a></span>.<a href="#section-note.1-2" class="pilcrow">¶</a></p>
-<p id="section-note.1-3">
-        Discussion of this document takes place on the
-        TSVWG Working Group mailing list (<span><a href="mailto:WG@example.com">mailto:WG@example.com</a></span>),
-        which is archived at <span><a href="https://example.com/WG">https://example.com/WG</a></span>.<a href="#section-note.1-3" class="pilcrow">¶</a></p>
-<p id="section-note.1-4">Source for this draft and an issue tracker can be found at
-        <span><a href="https://github.com/USER/REPO">https://github.com/USER/REPO</a></span>.<a href="#section-note.1-4" class="pilcrow">¶</a></p>
+It is intended for use within datacenters. Homa uses messages,
+receiver-issued grants, and packet priorities to support RPC workloads.
+Published evaluations report a reduction of more than 10x in tail latency
+for short messages relative to TCP for specific workloads
+and test conditions; this document does not claim a performance
+improvement for all datacenter environments.<a href="#section-abstract-1" class="pilcrow">¶</a></p>
 </section>
 <div id="status-of-memo">
 <section id="section-boilerplate.1">
@@ -1132,7 +1122,7 @@ performance improvements over TCP in this environment.<a href="#section-abstract
         time. It is inappropriate to use Internet-Drafts as reference
         material or to cite them other than as "work in progress."<a href="#section-boilerplate.1-3" class="pilcrow">¶</a></p>
 <p id="section-boilerplate.1-4">
-        This Internet-Draft will expire on 22 April 2027.<a href="#section-boilerplate.1-4" class="pilcrow">¶</a></p>
+        This Internet-Draft will expire on 23 April 2027.<a href="#section-boilerplate.1-4" class="pilcrow">¶</a></p>
 </section>
 </div>
 <div id="copyright">
@@ -1303,6 +1293,26 @@ performance improvements over TCP in this environment.<a href="#section-abstract
 </li>
           <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.13">
             <p id="section-toc.1-1.13.1"><a href="#section-13" class="auto internal xref">13</a>. <a href="#name-questions-and-unresolved-is" class="internal xref">Questions and Unresolved Issues</a></p>
+<ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.13.2.1">
+                <p id="section-toc.1-1.13.2.1.1"><a href="#section-13.1" class="auto internal xref">13.1</a>.  <a href="#name-requirement-language-policy" class="internal xref">Requirement language, policy, and implementation guidance</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.13.2.2">
+                <p id="section-toc.1-1.13.2.2.1"><a href="#section-13.2" class="auto internal xref">13.2</a>.  <a href="#name-encapsulation-and-wire-form" class="internal xref">Encapsulation and wire format</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.13.2.3">
+                <p id="section-toc.1-1.13.2.3.1"><a href="#section-13.3" class="auto internal xref">13.3</a>.  <a href="#name-loss-recovery-and-endpoint-" class="internal xref">Loss recovery and endpoint behavior</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.13.2.4">
+                <p id="section-toc.1-1.13.2.4.1"><a href="#section-13.4" class="auto internal xref">13.4</a>.  <a href="#name-security-and-resource-limit" class="internal xref">Security and resource limits</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.13.2.5">
+                <p id="section-toc.1-1.13.2.5.1"><a href="#section-13.5" class="auto internal xref">13.5</a>.  <a href="#name-congestion-priorities-and-d" class="internal xref">Congestion, priorities, and deployment</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.13.2.6">
+                <p id="section-toc.1-1.13.2.6.1"><a href="#section-13.6" class="auto internal xref">13.6</a>.  <a href="#name-publication-scope" class="internal xref">Publication scope</a></p>
+</li>
+            </ul>
 </li>
           <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.14">
             <p id="section-toc.1-1.14.1"><a href="#section-14" class="auto internal xref">14</a>. <a href="#name-references" class="internal xref">References</a></p>
@@ -1342,16 +1352,19 @@ server failures.<a href="#section-1-1" class="pilcrow">¶</a></p>
           <p id="section-1-3.2.1">Homa is connectionless.<a href="#section-1-3.2.1" class="pilcrow">¶</a></p>
 </li>
         <li class="normal" id="section-1-3.3">
-          <p id="section-1-3.3.1">Homa manages flow control and congestion from the receiver, not
-the sender, and does not depend on buffer occupancy as a signal
-for congestion.<a href="#section-1-3.3.1" class="pilcrow">¶</a></p>
+          <p id="section-1-3.3.1">Homa uses receiver-issued grants for flow control and does not depend
+on buffer occupancy as a signal for congestion. These properties
+describe Homa's flow-control mechanism; they do not, by themselves,
+specify congestion control for the switching fabric.<a href="#section-1-3.3.1" class="pilcrow">¶</a></p>
 </li>
         <li class="normal" id="section-1-3.4">
           <p id="section-1-3.4.1">Homa does not require in-order packet delivery.<a href="#section-1-3.4.1" class="pilcrow">¶</a></p>
 </li>
       </ul>
-<p id="section-1-4">The combination of all of these features allows Homa to achieve
-significantly higher performance than TCP in datacenter environments.<a href="#section-1-4" class="pilcrow">¶</a></p>
+<p id="section-1-4">These design choices target the latency and message-delivery
+requirements of datacenter RPC workloads. Performance depends on the
+workload and deployment conditions; this document does not claim that
+Homa outperforms TCP in every datacenter environment.<a href="#section-1-4" class="pilcrow">¶</a></p>
 <p id="section-1-5">Note: Homa is not suitable for use in WANs or other environments with
 high latency. Homa is designed under the assumption of round-trip
 times of a few tens of microseconds or less.<a href="#section-1-5" class="pilcrow">¶</a></p>
@@ -1361,25 +1374,23 @@ times of a few tens of microseconds or less.<a href="#section-1-5" class="pilcro
         <h3 id="name-background">
 <a href="#section-1.1" class="section-number selfRef">1.1. </a><a href="#name-background" class="section-name selfRef">Background</a>
         </h3>
-<p id="section-1.1-1">In spite of its long and successful history, TCP is a mediocre transport
-protocol for modern datacenters. Every significant element
-of TCP, from its stream orientation to its expectation
-of in-order packet delivery, is wrong for the datacenter <span>[<a href="#ReplaceTCP" class="cite xref">ReplaceTCP</a>]</span>.
-Applications using TCP cannot achieve the full performance
-potential of modern datacenter networking.<a href="#section-1.1-1" class="pilcrow">¶</a></p>
-<p id="section-1.1-2">Homa is a clean-slate redesign of network transport for applications
-running in datacenters.
-As a result, Homa provides lower latency than TCP across a wide range
-of message
-lengths and workloads. Its benefits are greatest for short
-messages in mixed workloads running at high network utilization:
-lab experiments show 10-100x reduction in tail latency under
-these conditions <span>[<a href="#HomaLinux" class="cite xref">HomaLinux</a>]</span>.<a href="#section-1.1-2" class="pilcrow">¶</a></p>
-<p id="section-1.1-3">See <span>[<a href="#Homa" class="cite xref">Homa</a>]</span> for more on the rationale for Homa, the original design
+<p id="section-1.1-1">TCP has been widely successful, but its byte-stream abstraction and
+in-order delivery can add queuing and head-of-line delays for datacenter
+RPC workloads, particularly when short messages share the network with
+larger transfers. Homa is a clean-slate, message-oriented transport
+designed for applications running in datacenters. It uses
+receiver-issued grants and packet priorities to address these workload
+characteristics. In lab experiments, Homa reduced tail latency for
+short messages in mixed workloads at high network utilization by
+10-100x compared with TCP <span>[<a href="#HomaLinux" class="cite xref">HomaLinux</a>]</span>. These results are specific to
+the evaluated workloads and test conditions; they should not be
+interpreted as a general performance guarantee across datacenter
+deployments.<a href="#section-1.1-1" class="pilcrow">¶</a></p>
+<p id="section-1.1-2">See <span>[<a href="#Homa" class="cite xref">Homa</a>]</span> for more on the rationale for Homa, the original design
 of Homa (which differs somewhat from the protocol described here) and
 early performance measurements. <span>[<a href="#HomaLinux" class="cite xref">HomaLinux</a>]</span> describes the first
 implementation of Homa in Linux, with additional performance
-measurements.<a href="#section-1.1-3" class="pilcrow">¶</a></p>
+measurements.<a href="#section-1.1-2" class="pilcrow">¶</a></p>
 </section>
 </div>
 <div id="homa-summary">
@@ -2654,29 +2665,29 @@ that it is already aware of, it should transmit either a <code>GRANT</code> or
       <h2 id="name-at-most-once-semantics">
 <a href="#section-7" class="section-number selfRef">7. </a><a href="#name-at-most-once-semantics" class="section-name selfRef">At-Most-Once Semantics</a>
       </h2>
-<p id="section-7-1">Homa endpoints <span class="bcp14">MUST</span> ensure that an RPC presented to Homa by a client
-is executed on the server exactly once as long as neither the client
-nor the server crashes and they can communicate. If there is a crash of
-either client or server during an RPC, or if there is an extended
-disruption in communication, then the RPC <span class="bcp14">MAY</span> be executed on the
-server either once or not at all. RPCs <span class="bcp14">MUST NOT</span> ever be executed more
-than once.<a href="#section-7-1" class="pilcrow">¶</a></p>
-<p id="section-7-2">Ensuring at-most-once semantics requires careful management of RPC
-state on servers. The server creates internal state for an RPC
+<p id="section-7-1">While a server retains state for an RPC, it <span class="bcp14">MUST NOT</span> pass that request
+to the server application more than once. This duplicate-suppression
+property does not guarantee at-most-once execution after the server
+reclaims the RPC state, crashes, or restarts. In those cases, a delayed
+or retried request can be treated as a new RPC and can be executed
+again. Applications that require at-most-once effects across state
+reclamation, crashes, or retries need application-level deduplication
+that persists across those events.<a href="#section-7-1" class="pilcrow">¶</a></p>
+<p id="section-7-2">Duplicate suppression requires careful management of RPC state on
+servers. The server creates internal state for an RPC
 when it receives the first <code>DATA</code> packet for that RPC. Under normal
 conditions the state will be retained until the RPC has been executed
 by the application and the result has been returned to the client.<a href="#section-7-2" class="pilcrow">¶</a></p>
 <p id="section-7-3">Up until the request message is passed to the server application for
-execution, the server <span class="bcp14">MAY</span> delete its state for the RPC: this is not
-generally advisable for performance reasons, but it is safe from
-the standpoint of
-at-most-once semantics. Once the request message has been passed to
-the server application, the server endpoint <span class="bcp14">MUST</span> retain its state
+execution, the server <span class="bcp14">MAY</span> delete its state for the RPC. Once the
+request message has been passed to the server application, the server
+endpoint <span class="bcp14">MUST</span> retain its state
 for the RPC until the client has received the response message or
 the server has reason to believe the client has crashed.
-If a server were to delete its state before one of these events
-occurs, then a <code>RESEND</code> from the client could cause the creation
-of a new RPC on the server, resulting in a second execution.<a href="#section-7-3" class="pilcrow">¶</a></p>
+If a server deletes its state before one of these events occurs, a
+<code>RESEND</code> from the client could cause the creation of a new RPC on the
+server. Applications requiring duplicate suppression beyond the
+lifetime of this endpoint state need a separate, durable mechanism.<a href="#section-7-3" class="pilcrow">¶</a></p>
 <p id="section-7-4">Homa includes an acknowledgment mechanism that clients use to notify
 servers that they have received the full response for an RPC; this
 indicates to the server that it can safely delete its state for the
@@ -2726,14 +2737,11 @@ it.<a href="#section-7-10" class="pilcrow">¶</a></p>
         <h3 id="name-discussion">
 <a href="#section-7.1" class="section-number selfRef">7.1. </a><a href="#name-discussion" class="section-name selfRef">Discussion</a>
         </h3>
-<p id="section-7.1-1">This mechanism is not quite adequate to prevent multiple executions. If
-a request packet is delayed in the network long enough for the server to
-receive its acknowledgment and delete its state, and if the packet
-contains an entire request, it could trigger a second execution on the
-server. To prevent this, servers will need to maintain additional state
-to detect long-delayed packets.
-This might include an rpcid for each client, such that all RPCs with
-rpcid's less than or equal to this have been processed.<a href="#section-7.1-1" class="pilcrow">¶</a></p>
+<p id="section-7.1-1">The duplicate-suppression property above does not prevent a delayed
+request from being executed again after the server has deleted its RPC
+state. Preventing this requires additional state to detect old requests,
+such as a per-client high-water mark of processed RPC identifiers.
+This document does not specify such a mechanism.<a href="#section-7.1-1" class="pilcrow">¶</a></p>
 <p id="section-7.1-2">It is questionable whether at-most-once semantics are worth the complexity
 they add to the protocol. Applications generally expect it, so not
 attempting to provide it could discourage Homa adoption.
@@ -2994,46 +3002,131 @@ welcome help identifying potential threats and other security issues.<a href="#s
       <h2 id="name-questions-and-unresolved-is">
 <a href="#section-13" class="section-number selfRef">13. </a><a href="#name-questions-and-unresolved-is" class="section-name selfRef">Questions and Unresolved Issues</a>
       </h2>
-<p id="section-13-1">This section contains questions about how to organize this document,
-plus issues that are not yet resolved in this spec (and in the current
-Linux implementation of Homa) or that may be bugs.<a href="#section-13-1" class="pilcrow">¶</a></p>
+<p id="section-13-1">The following questions are included to invite feedback from interested parties. Their resolution may require further
+discussion before this document can serve as a complete interoperable
+protocol specification.<a href="#section-13-1" class="pilcrow">¶</a></p>
+<div id="requirement-language-policy-and-implementation-guidance">
+<section id="section-13.1">
+        <h3 id="name-requirement-language-policy">
+<a href="#section-13.1" class="section-number selfRef">13.1. </a><a href="#name-requirement-language-policy" class="section-name selfRef">Requirement language, policy, and implementation guidance</a>
+        </h3>
 <ul class="normal">
-<li class="normal" id="section-13-2.1">
-          <p id="section-13-2.1.1">How to decide whether to use <span class="bcp14">MUST</span> vs. <span class="bcp14">SHOULD</span>? E.g., if something
-only affects performance but not correctness, is that a <span class="bcp14">SHOULD</span>?<a href="#section-13-2.1.1" class="pilcrow">¶</a></p>
+<li class="normal" id="section-13.1-1.1">
+            <p id="section-13.1-1.1.1">How to decide whether to use <span class="bcp14">MUST</span> vs. <span class="bcp14">SHOULD</span>? E.g., if something
+only affects performance but not correctness, is that a <span class="bcp14">SHOULD</span>?<a href="#section-13.1-1.1.1" class="pilcrow">¶</a></p>
 </li>
-        <li class="normal" id="section-13-2.2">
-          <p id="section-13-2.2.1">To what degree should this document discusses policy choices, vs. just
+          <li class="normal" id="section-13.1-1.2">
+            <p id="section-13.1-1.2.1">To what degree should this document discuss policy choices, vs. just
 the mechanisms? In some cases, such as policies for issuing grants,
 it's not a problem if different endpoints use different policies.
-To what degree should that be reflected here?<a href="#section-13-2.2.1" class="pilcrow">¶</a></p>
+To what degree should that be reflected here?<a href="#section-13.1-1.2.1" class="pilcrow">¶</a></p>
 </li>
-        <li class="normal" id="section-13-2.3">
-          <p id="section-13-2.3.1">How much should this document reflect current hardware and software
-characteristics?<a href="#section-13-2.3.1" class="pilcrow">¶</a></p>
+          <li class="normal" id="section-13.1-1.3">
+            <p id="section-13.1-1.3.1">How much should this document reflect current hardware and software
+characteristics?<a href="#section-13.1-1.3.1" class="pilcrow">¶</a></p>
 </li>
-        <li class="normal" id="section-13-2.4">
-          <p id="section-13-2.4.1">Should this document describe details of the Linux implementation?
-This information might be useful to people writing new implementations.<a href="#section-13-2.4.1" class="pilcrow">¶</a></p>
+          <li class="normal" id="section-13.1-1.4">
+            <p id="section-13.1-1.4.1">Should this document describe details of the Linux implementation?
+This information might be useful to people writing new implementations.<a href="#section-13.1-1.4.1" class="pilcrow">¶</a></p>
 </li>
-        <li class="normal" id="section-13-2.5">
-          <p id="section-13-2.5.1">Ideally, packet spraying should be used in the switching fabric. However,
-Homa should also be able to spray packets by varying one of the port fields.<a href="#section-13-2.5.1" class="pilcrow">¶</a></p>
+        </ul>
+</section>
+</div>
+<div id="encapsulation-and-wire-format">
+<section id="section-13.2">
+        <h3 id="name-encapsulation-and-wire-form">
+<a href="#section-13.2" class="section-number selfRef">13.2. </a><a href="#name-encapsulation-and-wire-form" class="section-name selfRef">Encapsulation and wire format</a>
+        </h3>
+<ul class="normal">
+<li class="normal" id="section-13.2-1.1">
+            <p id="section-13.2-1.1.1">Which packet-carriage method should this version specify: Homa directly
+using IP protocol number 146, or Homa over UDP? Could the choice also
+define packet demultiplexing, checksum handling, address-family behavior,
+and any required IANA actions? Once UDP encapsulation is complete,
+should all mention of TCP hijacking be removed?<a href="#section-13.2-1.1.1" class="pilcrow">¶</a></p>
 </li>
-        <li class="normal" id="section-13-2.6">
-          <p id="section-13-2.6.1">Specify constants, such as largest message length and number of priorities?<a href="#section-13-2.6.1" class="pilcrow">¶</a></p>
+          <li class="normal" id="section-13.2-1.2">
+            <p id="section-13.2-1.2.1">What additional rules would independent implementers need for field
+encoding, the relationship between <code>Rpcid</code> and <code>S</code>, protocol versioning,
+malformed packets, and packet-size, path-MTU, or fragmentation behavior?<a href="#section-13.2-1.2.1" class="pilcrow">¶</a></p>
 </li>
-        <li class="normal" id="section-13-2.7">
-          <p id="section-13-2.7.1">How to determine the limit for unscheduled messages? Include in CUTOFFS packets?<a href="#section-13-2.7.1" class="pilcrow">¶</a></p>
+          <li class="normal" id="section-13.2-1.3">
+            <p id="section-13.2-1.3.1">Specify constants, such as largest message length and number of priorities?<a href="#section-13.2-1.3.1" class="pilcrow">¶</a></p>
 </li>
-        <li class="normal" id="section-13-2.8">
-          <p id="section-13-2.8.1">Change to drive retransmission entirely from the client?<a href="#section-13-2.8.1" class="pilcrow">¶</a></p>
+        </ul>
+</section>
+</div>
+<div id="loss-recovery-and-endpoint-behavior">
+<section id="section-13.3">
+        <h3 id="name-loss-recovery-and-endpoint-">
+<a href="#section-13.3" class="section-number selfRef">13.3. </a><a href="#name-loss-recovery-and-endpoint-" class="section-name selfRef">Loss recovery and endpoint behavior</a>
+        </h3>
+<ul class="normal">
+<li class="normal" id="section-13.3-1.1">
+            <p id="section-13.3-1.1.1">Change to drive retransmission entirely from the client?<a href="#section-13.3-1.1.1" class="pilcrow">¶</a></p>
 </li>
-        <li class="normal" id="section-13-2.9">
-          <p id="section-13-2.9.1">Eliminate all mention of TCP hijacking once the implementation of UDP
-encapsulation is complete.<a href="#section-13-2.9.1" class="pilcrow">¶</a></p>
+          <li class="normal" id="section-13.3-1.2">
+            <p id="section-13.3-1.2.1">Could sender and receiver state transitions be specified for packet
+loss, reordering, stale grants and cutoff updates, RESEND ranges,
+and ACK/NEED_ACK recovery?<a href="#section-13.3-1.2.1" class="pilcrow">¶</a></p>
 </li>
-      </ul>
+        </ul>
+</section>
+</div>
+<div id="security-and-resource-limits">
+<section id="section-13.4">
+        <h3 id="name-security-and-resource-limit">
+<a href="#section-13.4" class="section-number selfRef">13.4. </a><a href="#name-security-and-resource-limit" class="section-name selfRef">Security and resource limits</a>
+        </h3>
+<ul class="normal">
+<li class="normal" id="section-13.4-1.1">
+            <p id="section-13.4-1.1.1">Could contributors help identify appropriate protections against spoofed
+or replayed packets, forged retransmission or state-release requests,
+and denial-of-service attacks?<a href="#section-13.4-1.1.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-13.4-1.2">
+            <p id="section-13.4-1.2.1">What resource bounds and endpoint behavior should be specified for
+incomplete RPCs, reassembly, outstanding state, and unscheduled traffic?<a href="#section-13.4-1.2.1" class="pilcrow">¶</a></p>
+</li>
+        </ul>
+</section>
+</div>
+<div id="congestion-priorities-and-deployment">
+<section id="section-13.5">
+        <h3 id="name-congestion-priorities-and-d">
+<a href="#section-13.5" class="section-number selfRef">13.5. </a><a href="#name-congestion-priorities-and-d" class="section-name selfRef">Congestion, priorities, and deployment</a>
+        </h3>
+<ul class="normal">
+<li class="normal" id="section-13.5-1.1">
+            <p id="section-13.5-1.1.1">What deployment assumptions should this document make about network
+congestion and coexistence with non-Homa traffic? Are additional
+requirements needed for priority mapping, fairness, starvation
+prevention, or network configuration?<a href="#section-13.5-1.1.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-13.5-1.2">
+            <p id="section-13.5-1.2.1">How to determine the limit for unscheduled messages? Include in CUTOFFS packets?<a href="#section-13.5-1.2.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-13.5-1.3">
+            <p id="section-13.5-1.3.1">Ideally, packet spraying should be used in the switching fabric. However,
+Homa should also be able to spray packets by varying one of the port fields.<a href="#section-13.5-1.3.1" class="pilcrow">¶</a></p>
+</li>
+        </ul>
+</section>
+</div>
+<div id="publication-scope">
+<section id="section-13.6">
+        <h3 id="name-publication-scope">
+<a href="#section-13.6" class="section-number selfRef">13.6. </a><a href="#name-publication-scope" class="section-name selfRef">Publication scope</a>
+        </h3>
+<ul class="normal">
+<li class="normal" id="section-13.6-1.1">
+            <p id="section-13.6-1.1.1">What publication category and IETF stream are appropriate for this
+document? Could the acknowledgments and other remaining editorial
+details also be finalized before RFC publication?<a href="#section-13.6-1.1.1" class="pilcrow">¶</a></p>
+</li>
+        </ul>
+</section>
+</div>
 </section>
 </div>
 <div id="sec-combined-references">
