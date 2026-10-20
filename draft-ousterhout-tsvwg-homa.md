@@ -80,7 +80,8 @@ applications with a reliable and efficient mechanism for delivering
 request and response messages for remote procedure calls (RPCs).
 It is intended for use within datacenters. Homa uses messages,
 receiver-issued grants, and packet priorities to support RPC workloads.
-Published evaluations report performance results for specific workloads
+Published evaluations report a reduction of more than 10x in tail latency
+for short messages relative to TCP for specific workloads
 and test conditions; this document does not claim a performance
 improvement for all datacenter environments.
 
